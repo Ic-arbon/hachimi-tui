@@ -5,7 +5,8 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, REFERER, USER_AGENT
 use tokio::sync::RwLock;
 
 use crate::config::auth_store::AuthData;
-use crate::model::{CommonError, WebResp};
+use crate::model::WebResp;
+use crate::model::auth::RefreshTokenReq;
 
 const DEFAULT_BASE_URL: &str = "https://api.hachimi.world";
 
@@ -54,6 +55,48 @@ impl HachimiClient {
         self.auth.try_read().map_or(false, |g| g.is_some())
     }
 
+    /// 检查 token 是否过期，过期则尝试刷新，刷新失败则清除认证
+    pub async fn ensure_valid_auth(&self) {
+        let (expired, refresh_token) = {
+            let guard = self.auth.read().await;
+            match guard.as_ref() {
+                Some(auth) if auth.is_expired() => (true, auth.refresh_token.clone()),
+                _ => return,
+            }
+        };
+        if !expired {
+            return;
+        }
+        // 尝试刷新 token
+        let result = self
+            .refresh_token(&RefreshTokenReq {
+                refresh_token,
+                device_info: "hachimi-tui".to_string(),
+            })
+            .await;
+        match result {
+            Ok(pair) => {
+                let old_username = {
+                    let guard = self.auth.read().await;
+                    guard.as_ref().and_then(|a| a.username.clone())
+                };
+                let auth = AuthData {
+                    access_token: pair.access_token,
+                    refresh_token: pair.refresh_token,
+                    expires_at: pair.expires_in.timestamp(),
+                    username: old_username,
+                };
+                let _ = crate::config::auth_store::save(&auth);
+                self.set_auth(auth).await;
+            }
+            Err(_) => {
+                // 刷新失败，清除认证以降级到匿名模式
+                self.clear_auth().await;
+                let _ = crate::config::auth_store::clear();
+            }
+        }
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
@@ -65,6 +108,28 @@ impl HachimiClient {
             .map(|a| format!("Bearer {}", a.access_token))
     }
 
+    /// 解析 JSON 响应，出错时附带路径和原始 body 片段
+    fn parse_response<T: serde::de::DeserializeOwned>(
+        path: &str,
+        text: &str,
+    ) -> Result<T> {
+        // 先尝试解析为标准 WebResp
+        match serde_json::from_str::<WebResp<T>>(text) {
+            Ok(web) => web
+                .into_result()
+                .map_err(|e| anyhow::anyhow!("[{}] {}", path, e)),
+            Err(_) => {
+                // 非 WebResp 格式，尝试提取 error 字段（如 {"error":"Invalid token"}）
+                if let Ok(obj) = serde_json::from_str::<serde_json::Value>(text) {
+                    if let Some(err) = obj.get("error").and_then(|v| v.as_str()) {
+                        bail!("[{}] {}", path, err);
+                    }
+                }
+                bail!("[{}] unexpected response: {}", path, &text[..text.len().min(200)]);
+            }
+        }
+    }
+
     /// GET 请求（无参数）
     pub async fn get<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = self.url(path);
@@ -73,10 +138,8 @@ impl HachimiClient {
             req = req.header(AUTHORIZATION, auth);
         }
 
-        let resp = req.send().await?;
-        let web: WebResp<T> = resp.json().await?;
-        web.into_result()
-            .map_err(|e| anyhow::anyhow!("{}", e))
+        let text = req.send().await?.text().await?;
+        Self::parse_response(path, &text)
     }
 
     /// GET 请求（带查询参数）
@@ -91,10 +154,8 @@ impl HachimiClient {
             req = req.header(AUTHORIZATION, auth);
         }
 
-        let resp = req.send().await?;
-        let web: WebResp<T> = resp.json().await?;
-        web.into_result()
-            .map_err(|e| anyhow::anyhow!("{}", e))
+        let text = req.send().await?.text().await?;
+        Self::parse_response(path, &text)
     }
 
     /// POST 请求（JSON body）
@@ -109,15 +170,19 @@ impl HachimiClient {
             req = req.header(AUTHORIZATION, auth);
         }
 
-        let resp = req.send().await?;
-        let web: WebResp<T> = resp.json().await?;
-        web.into_result()
-            .map_err(|e| anyhow::anyhow!("{}", e))
+        let text = req.send().await?.text().await?;
+        Self::parse_response(path, &text)
     }
 
     /// 获取音频流（用于流式播放）
+    /// url 可以是完整 URL 或相对路径
     pub async fn get_audio_stream(&self, url: &str) -> Result<reqwest::Response> {
-        let mut req = self.http.get(url);
+        let full_url = if url.starts_with("http://") || url.starts_with("https://") {
+            url.to_string()
+        } else {
+            self.url(url)
+        };
+        let mut req = self.http.get(&full_url);
         if let Some(auth) = self.auth_header().await {
             req = req.header(AUTHORIZATION, auth);
         }

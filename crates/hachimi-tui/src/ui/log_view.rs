@@ -97,7 +97,14 @@ pub fn render(frame: &mut Frame, area: Rect, store: &LogStore) {
     let y = area.y + (area.height.saturating_sub(panel_h)) / 2;
     let panel_area = Rect::new(x, y, panel_w, panel_h);
 
-    frame.render_widget(Clear, panel_area);
+    // 左右各多清 1 列，避免双宽字符被截断导致边框消失
+    let clear_area = Rect::new(
+        panel_area.x.saturating_sub(1),
+        panel_area.y,
+        (panel_area.width + 2).min(area.width - panel_area.x.saturating_sub(1) + area.x),
+        panel_area.height,
+    );
+    frame.render_widget(Clear, clear_area);
 
     // 可用内容行数 = 面板高度 - 2 (border) - 1 (底部提示)
     let visible_lines = panel_h.saturating_sub(3) as usize;
@@ -105,7 +112,7 @@ pub fn render(frame: &mut Frame, area: Rect, store: &LogStore) {
     let mut lines: Vec<Line> = Vec::new();
 
     if store.entries.is_empty() {
-        lines.push(Line::from(Span::styled("  No logs yet", Theme::secondary())));
+        lines.push(Line::from(Span::styled(format!("  {}", t!("logs.empty")), Theme::secondary())));
     } else {
         let total = store.entries.len();
         let start = store.scroll.min(total.saturating_sub(visible_lines));
@@ -130,7 +137,7 @@ pub fn render(frame: &mut Frame, area: Rect, store: &LogStore) {
     // 底部提示
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "    j/k scroll  ·  Esc/! close",
+        format!("    {}", t!("logs.hint")),
         Theme::secondary(),
     )));
 
@@ -138,7 +145,7 @@ pub fn render(frame: &mut Frame, area: Rect, store: &LogStore) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
         .title(Span::styled(
-            " Logs ",
+            format!(" {} ", t!("logs.title")),
             Style::default().add_modifier(Modifier::BOLD),
         ));
 

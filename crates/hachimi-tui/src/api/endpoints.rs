@@ -198,6 +198,10 @@ impl HachimiClient {
         self.get("/song/tag/recommend").await
     }
 
+    pub async fn recommend_tags_anonymous(&self) -> Result<TagRecommendResp> {
+        self.get("/song/tag/recommend_anonymous").await
+    }
+
     pub async fn songs_by_user(&self, query: &PageByUserQuery) -> Result<PageByUserResp> {
         self.get_with_query("/song/page_by_user", query).await
     }

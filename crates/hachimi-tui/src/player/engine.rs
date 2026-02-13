@@ -1,10 +1,9 @@
 use std::io::Cursor;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
-use tokio::sync::{mpsc, watch, Mutex};
+use rodio::{Decoder, OutputStream, Sink};
+use tokio::sync::{mpsc, watch};
 
 /// 播放引擎发给 UI 的事件
 #[derive(Debug, Clone)]
@@ -21,7 +20,7 @@ pub enum PlayerEvent {
 /// UI 发给播放引擎的命令
 #[derive(Debug)]
 pub enum PlayerCommand {
-    Play(AudioSource),
+    Play(AudioSource, u32), // (source, duration_secs)
     Pause,
     Resume,
     Stop,
@@ -53,8 +52,8 @@ impl PlayerEngine {
         Ok(Self { cmd_tx, event_rx })
     }
 
-    pub fn play(&self, source: AudioSource) {
-        let _ = self.cmd_tx.send(PlayerCommand::Play(source));
+    pub fn play(&self, source: AudioSource, duration_secs: u32) {
+        let _ = self.cmd_tx.send(PlayerCommand::Play(source, duration_secs));
     }
 
     pub fn pause(&self) {
@@ -95,13 +94,15 @@ fn player_thread(
     sink.pause();
 
     let mut has_source = false;
+    let mut duration_secs: u32 = 0;
 
     loop {
         // 非阻塞检查命令
         match cmd_rx.try_recv() {
             Ok(cmd) => match cmd {
-                PlayerCommand::Play(source) => {
+                PlayerCommand::Play(source, dur) => {
                     sink.stop();
+                    duration_secs = dur;
                     match source {
                         AudioSource::Buffered(data) => {
                             let cursor = Cursor::new(data);
@@ -134,9 +135,8 @@ fn player_thread(
                     has_source = false;
                     let _ = event_tx.send(PlayerEvent::Stopped);
                 }
-                PlayerCommand::Seek(_pos) => {
-                    // rodio Sink 不直接支持 seek，需要 try_seek
-                    if let Err(e) = sink.try_seek(_pos) {
+                PlayerCommand::Seek(pos) => {
+                    if let Err(e) = sink.try_seek(pos) {
                         let _ = event_tx.send(PlayerEvent::Error(
                             format!("Seek 失败: {e}"),
                         ));
@@ -148,6 +148,15 @@ fn player_thread(
             },
             Err(mpsc::error::TryRecvError::Empty) => {}
             Err(mpsc::error::TryRecvError::Disconnected) => break,
+        }
+
+        // 上报播放进度
+        if has_source && !sink.empty() && !sink.is_paused() {
+            let pos = sink.get_pos().as_secs() as u32;
+            let _ = event_tx.send(PlayerEvent::Progress {
+                position_secs: pos,
+                duration_secs,
+            });
         }
 
         // 检测播放结束

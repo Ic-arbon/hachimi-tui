@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::paths;
+use crate::ui::i18n::Lang;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -42,6 +43,8 @@ pub struct CacheSettings {
 pub struct DisplaySettings {
     #[serde(default)]
     pub kids_mode: bool,
+    #[serde(default)]
+    pub language: Lang,
 }
 
 fn default_volume() -> u8 {
@@ -84,7 +87,10 @@ impl Default for CacheSettings {
 
 impl Default for DisplaySettings {
     fn default() -> Self {
-        Self { kids_mode: false }
+        Self {
+            kids_mode: false,
+            language: Lang::default(),
+        }
     }
 }
 

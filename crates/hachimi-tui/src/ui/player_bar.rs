@@ -1,12 +1,13 @@
+use unicode_width::UnicodeWidthStr;
+
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
 };
 
-use crate::config::settings::PlayMode;
 use super::theme::Theme;
 
 pub struct PlayerBarState {
@@ -15,10 +16,8 @@ pub struct PlayerBarState {
     pub artist: String,
     pub current_secs: u32,
     pub total_secs: u32,
-    pub volume: u8,
-    pub play_mode: PlayMode,
     pub is_loading: bool,
-    pub is_muted: bool,
+    pub cover_url: String,
 }
 
 impl Default for PlayerBarState {
@@ -29,10 +28,8 @@ impl Default for PlayerBarState {
             artist: String::new(),
             current_secs: 0,
             total_secs: 0,
-            volume: 80,
-            play_mode: PlayMode::default(),
             is_loading: false,
-            is_muted: false,
+            cover_url: String::new(),
         }
     }
 }
@@ -46,7 +43,7 @@ impl PlayerBarState {
 /// 渲染底部播放状态栏
 pub fn render(frame: &mut Frame, area: Rect, state: &PlayerBarState) {
     if !state.has_song() {
-        let empty = Paragraph::new("  No song playing")
+        let empty = Paragraph::new(format!("  {}", t!("player.no_song")))
             .style(Theme::secondary());
         frame.render_widget(empty, area);
         return;
@@ -65,32 +62,20 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PlayerBarState) {
 
     let progress_bar = build_progress_bar(state.current_secs, state.total_secs, 10);
 
-    let mode_icon = match state.play_mode {
-        PlayMode::Sequential => "→",
-        PlayMode::Shuffle => "⇄",
-        PlayMode::RepeatOne => "↻1",
-    };
-
-    let volume_icon = if state.is_muted {
-        "🎧\u{fe0e}×"
-    } else {
-        "🎧\u{fe0e}"
-    };
-
     let song_info = format!("{} - {}", state.title, state.artist);
     let right_part = format!(
-        " {}/{} {} {} {}{}%",
-        time_current, time_total, progress_bar, mode_icon, volume_icon, state.volume
+        " {}/{} {} ",
+        time_current, time_total, progress_bar
     );
 
     let available_width = area.width as usize;
-    let right_len = right_part.chars().count();
+    let right_len = right_part.width();
     let icon_part = format!("  {} ", status_icon);
-    let icon_len = icon_part.chars().count();
+    let icon_len = icon_part.width();
 
     let song_max = available_width.saturating_sub(right_len + icon_len);
     let song_display = truncate_str(&song_info, song_max);
-    let padding = available_width.saturating_sub(icon_len + song_display.chars().count() + right_len);
+    let padding = available_width.saturating_sub(icon_len + song_display.width() + right_len);
 
     let line = Line::from(vec![
         Span::styled(icon_part, Theme::active()),
@@ -120,10 +105,20 @@ fn build_progress_bar(current: u32, total: u32, width: usize) -> String {
 }
 
 fn truncate_str(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max.saturating_sub(2)).collect();
-        format!("{}..", truncated)
+    if s.width() <= max {
+        return s.to_string();
     }
+    let content_max = max.saturating_sub(2);
+    let mut result = String::new();
+    let mut w = 0;
+    for c in s.chars() {
+        let cw = UnicodeWidthStr::width(c.to_string().as_str());
+        if w + cw > content_max {
+            break;
+        }
+        result.push(c);
+        w += cw;
+    }
+    result.push_str("..");
+    result
 }

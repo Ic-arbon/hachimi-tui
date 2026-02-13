@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
+use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
@@ -12,13 +13,17 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
 };
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
 use tokio::sync::mpsc;
 
 use crate::api::client::HachimiClient;
-use crate::api::endpoints::RecentQuery;
-use crate::config::settings::Settings;
+use crate::api::endpoints::{RecentQuery, SongSearchQuery};
+use crate::config::settings::{PlayMode, Settings};
 use crate::model::auth::LoginReq;
+use crate::model::queue::{MusicQueueItem, QueueState};
 use crate::model::song::PublicSongDetail;
+use crate::player::engine::{AudioSource, PlayerEngine, PlayerEvent};
 use crate::ui::log_view::{LogLevel, LogStore};
 use crate::ui::login::{LoginState, LoginStep};
 use crate::ui::navigation::{NavNode, NavStack, SearchState};
@@ -28,8 +33,22 @@ use crate::ui::player_bar::PlayerBarState;
 pub enum AppMessage {
     /// 终端事件（由持久后台线程读取）
     TermEvent(Event),
-    /// 播放状态更新
+    /// 播放状态更新（UI 动画驱动）
     PlayerTick,
+    /// 播放引擎事件
+    PlayerStateChanged(PlayerEvent),
+    /// 音频下载完成
+    AudioFetched {
+        title: String,
+        artist: String,
+        duration_secs: u32,
+        data: Vec<u8>,
+        cover_url: String,
+    },
+    /// 音频下载失败
+    AudioFetchError(String),
+    /// 封面图解码完成
+    ImageFetched { url: String, img: image::DynamicImage },
     /// API 数据加载完成
     DataLoaded(DataPayload),
     /// 错误通知
@@ -43,6 +62,7 @@ pub enum AppMessage {
 /// 后台加载的数据
 pub enum DataPayload {
     Songs(NavNode, Vec<PublicSongDetail>),
+    Tags(Vec<String>),
 }
 
 /// 输入模式
@@ -62,14 +82,22 @@ pub struct App {
     pub input_mode: InputMode,
     pub player_expanded: bool,
     pub player_bar: PlayerBarState,
+    pub player: PlayerEngine,
+    pub volume: u8,
+    pub is_muted: bool,
+    pub queue: QueueState,
     pub login: LoginState,
     pub show_help: bool,
     pub show_logs: bool,
     pub logs: LogStore,
     pub username: Option<String>,
     pub song_cache: HashMap<NavNode, Vec<PublicSongDetail>>,
+    pub tag_cache: Vec<String>,
     loading: HashSet<NavNode>,
     pub scroll_tick: u16,
+    pub picker: Option<Picker>,
+    pub image_cache: HashMap<String, StatefulProtocol>,
+    image_loading: HashSet<String>,
     pub msg_tx: mpsc::UnboundedSender<AppMessage>,
     msg_rx: mpsc::UnboundedReceiver<AppMessage>,
 }
@@ -80,13 +108,39 @@ impl App {
         let client = HachimiClient::new(None)?;
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();
 
-        // 加载已保存的认证信息
-        let has_auth = if let Ok(Some(auth)) = crate::config::auth_store::load() {
-            client.set_auth(auth).await;
-            true
+        // 加载已保存的认证信息，并检查 token 是否过期
+        let (has_auth, saved_username) = if let Ok(Some(auth)) = crate::config::auth_store::load() {
+            let name = auth.username.clone();
+            client.set_auth(auth.clone()).await;
+            client.ensure_valid_auth().await;
+            let authenticated = client.is_authenticated().await;
+            // 旧 auth 文件可能没有 username，从 JWT 提取 uid 后调 API 获取
+            let name = if name.is_none() && authenticated {
+                if let Some(uid) = crate::config::auth_store::extract_uid_from_token(&auth.access_token) {
+                    match client.user_profile(uid).await {
+                        Ok(profile) => {
+                            let uname = profile.username.clone();
+                            // 回存到 auth 文件
+                            let mut updated = crate::config::auth_store::load()
+                                .ok().flatten().unwrap_or(auth);
+                            updated.username = Some(uname.clone());
+                            let _ = crate::config::auth_store::save(&updated);
+                            Some(uname)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                name
+            };
+            (authenticated, name)
         } else {
-            false
+            (false, None)
         };
+
+        crate::ui::i18n::set_lang(settings.display.language);
 
         let volume = settings.player.volume;
         let input_mode = if has_auth {
@@ -94,6 +148,13 @@ impl App {
         } else {
             InputMode::Login
         };
+
+        // 创建播放引擎
+        let player = PlayerEngine::spawn()?;
+        player.set_volume(volume as f32 / 100.0);
+
+        // 加载或创建播放队列
+        let queue = QueueState::load_persisted().unwrap_or_else(|_| QueueState::new());
 
         Ok(Self {
             running: true,
@@ -103,18 +164,23 @@ impl App {
             search: SearchState::new(),
             input_mode,
             player_expanded: false,
-            player_bar: PlayerBarState {
-                volume,
-                ..Default::default()
-            },
+            player_bar: PlayerBarState::default(),
+            volume,
+            is_muted: false,
+            player,
+            queue,
             login: LoginState::new(),
             show_help: false,
             show_logs: false,
             logs: LogStore::new(),
-            username: None,
+            username: saved_username,
             song_cache: HashMap::new(),
+            tag_cache: Vec::new(),
             loading: HashSet::new(),
             scroll_tick: 0,
+            picker: None,
+            image_cache: HashMap::new(),
+            image_loading: HashSet::new(),
             msg_tx,
             msg_rx,
         })
@@ -127,7 +193,15 @@ impl App {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
+        self.picker = Some(
+            Picker::from_query_stdio()
+                .unwrap_or_else(|_| Picker::from_fontsize((8, 16)))
+        );
+
         let result = self.main_loop(&mut terminal).await;
+
+        // 退出时持久化队列
+        let _ = self.queue.persist();
 
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -168,6 +242,18 @@ impl App {
             }
         });
 
+        // 监听播放引擎事件，转发为 AppMessage
+        let player_tx = self.msg_tx.clone();
+        let mut player_rx = self.player.subscribe();
+        tokio::spawn(async move {
+            while player_rx.changed().await.is_ok() {
+                let event = player_rx.borrow().clone();
+                if player_tx.send(AppMessage::PlayerStateChanged(event)).is_err() {
+                    break;
+                }
+            }
+        });
+
         while self.running {
             terminal.draw(|f| self.render(f))?;
 
@@ -183,7 +269,9 @@ impl App {
             // 帮助浮层打开时，只响应关闭操作
             if self.show_help {
                 match key.code {
-                    KeyCode::Char('?') | KeyCode::Esc => self.show_help = false,
+                    KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Esc => {
+                        self.show_help = false;
+                    }
                     _ => {}
                 }
                 return;
@@ -192,7 +280,9 @@ impl App {
             // 日志浮层打开时，只响应滚动和关闭
             if self.show_logs {
                 match key.code {
-                    KeyCode::Char('!') | KeyCode::Esc => self.show_logs = false,
+                    KeyCode::Char('q') | KeyCode::Char('!') | KeyCode::Esc => {
+                        self.show_logs = false;
+                    }
                     KeyCode::Char('j') | KeyCode::Down => self.logs.scroll_down(),
                     KeyCode::Char('k') | KeyCode::Up => self.logs.scroll_up(),
                     _ => {}
@@ -225,28 +315,43 @@ impl App {
                 self.logout();
             }
             (_, KeyCode::Char(' ')) => {
-                // TODO: 播放/暂停
+                self.toggle_play_pause();
             }
             (_, KeyCode::Char('n')) => {
-                // TODO: 下一曲
+                self.play_next();
             }
             (_, KeyCode::Char('N')) => {
-                // TODO: 上一曲
+                self.play_prev();
             }
             (_, KeyCode::Char('+') | KeyCode::Char('=')) => {
-                // TODO: 音量增大
+                let vol = (self.volume as u16 + 5).min(100) as u8;
+                self.volume = vol;
+                self.player.set_volume(vol as f32 / 100.0);
             }
             (_, KeyCode::Char('-')) => {
-                // TODO: 音量减小
+                let vol = self.volume.saturating_sub(5);
+                self.volume = vol;
+                self.player.set_volume(vol as f32 / 100.0);
             }
             (_, KeyCode::Char('>')) => {
-                // TODO: 快进 5s
+                if self.player_bar.has_song() {
+                    let new_pos = (self.player_bar.current_secs + 5)
+                        .min(self.player_bar.total_secs);
+                    self.player.seek(Duration::from_secs(new_pos as u64));
+                }
             }
             (_, KeyCode::Char('<')) => {
-                // TODO: 快退 5s
+                if self.player_bar.has_song() {
+                    let new_pos = self.player_bar.current_secs.saturating_sub(5);
+                    self.player.seek(Duration::from_secs(new_pos as u64));
+                }
             }
             (_, KeyCode::Char('s')) => {
-                // TODO: 切换播放模式
+                self.settings.player.default_play_mode = match self.settings.player.default_play_mode {
+                    PlayMode::Sequential => PlayMode::Shuffle,
+                    PlayMode::Shuffle => PlayMode::RepeatOne,
+                    PlayMode::RepeatOne => PlayMode::Sequential,
+                };
             }
             (_, KeyCode::Char('v')) => {
                 self.player_expanded = !self.player_expanded;
@@ -265,7 +370,7 @@ impl App {
             (_, KeyCode::Char('G')) => self.nav_bottom(),
 
             (_, KeyCode::Char('a')) => {
-                // TODO: 添加到队列
+                self.add_selected_to_queue();
             }
             (_, KeyCode::Char('p')) => {
                 // TODO: 添加到歌单
@@ -347,13 +452,11 @@ impl App {
     fn handle_login_captcha_key(&mut self, key: KeyEvent) {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc) => {
-                // 取消 captcha，回到输入
                 self.login.step = LoginStep::Input;
                 self.login.captcha_key = None;
                 self.login.error = None;
             }
             (_, KeyCode::Enter) => {
-                // 用户在浏览器完成 captcha 后按 Enter 继续登录
                 self.submit_login();
             }
             _ => {}
@@ -366,7 +469,7 @@ impl App {
         let password = self.login.password.clone();
 
         if email.is_empty() || password.is_empty() {
-            self.login.error = Some("Email and password required".to_string());
+            self.login.error = Some(t!("app.email_password_required").to_string());
             return;
         }
 
@@ -389,7 +492,7 @@ impl App {
     /// 第二步：captcha 已完成，提交登录
     fn submit_login(&mut self) {
         let Some(captcha_key) = self.login.captcha_key.clone() else {
-            self.login.error = Some("No captcha key".to_string());
+            self.login.error = Some(t!("app.no_captcha_key").to_string());
             self.login.step = LoginStep::Input;
             return;
         };
@@ -435,7 +538,12 @@ impl App {
     }
 
     fn load_node_data(&mut self, node: &NavNode) {
-        if self.loading.contains(node) || self.song_cache.contains_key(node) {
+        // Categories 用 tag_cache 而非 song_cache
+        if *node == NavNode::Categories {
+            if self.loading.contains(node) || !self.tag_cache.is_empty() {
+                return;
+            }
+        } else if self.loading.contains(node) || self.song_cache.contains_key(node) {
             return;
         }
         self.loading.insert(node.clone());
@@ -444,6 +552,26 @@ impl App {
         let client = self.client.clone();
 
         tokio::spawn(async move {
+            // Categories 走单独的 tag 加载流程
+            if node_owned == NavNode::Categories {
+                let result = if client.is_authenticated().await {
+                    client.recommend_tags().await
+                } else {
+                    client.recommend_tags_anonymous().await
+                };
+                match result {
+                    Ok(resp) => {
+                        let names: Vec<String> = resp.result.into_iter().map(|t| t.name).collect();
+                        let _ = tx.send(AppMessage::DataLoaded(DataPayload::Tags(names)));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppMessage::DataLoaded(DataPayload::Tags(vec![])));
+                        let _ = tx.send(AppMessage::Error(e.to_string()));
+                    }
+                }
+                return;
+            }
+
             let result = match &node_owned {
                 NavNode::LatestReleases => client
                     .recent_songs(&RecentQuery {
@@ -454,10 +582,27 @@ impl App {
                     .await
                     .map(|r| r.songs),
                 NavNode::DailyRecommend => {
-                    client.recommend_songs().await.map(|r| r.songs)
+                    let resp = if client.is_authenticated().await {
+                        client.recommend_songs().await
+                    } else {
+                        client.recommend_songs_anonymous().await
+                    };
+                    resp.map(|r| r.songs)
                 }
                 NavNode::WeeklyHot => {
                     client.hot_songs_weekly().await.map(|r| r.songs)
+                }
+                NavNode::Tag { name } => {
+                    client
+                        .search_songs(&SongSearchQuery {
+                            q: String::new(),
+                            limit: Some(30),
+                            offset: None,
+                            filter: Some(format!("tags = \"{}\"", name)),
+                            sort_by: Some("release_time_desc".to_string()),
+                        })
+                        .await
+                        .map(|r| r.hits.into_iter().map(|s| s.into_song_detail()).collect())
                 }
                 _ => return,
             };
@@ -490,6 +635,12 @@ impl App {
                     self.load_node_data(&child);
                 }
             }
+        } else if node == NavNode::Categories {
+            // 加载选中标签的歌曲预览
+            if let Some(tag_name) = self.tag_cache.get(sel).cloned() {
+                let tag_node = NavNode::Tag { name: tag_name };
+                self.load_node_data(&tag_node);
+            }
         }
     }
 
@@ -500,7 +651,52 @@ impl App {
             }
             AppMessage::PlayerTick => {
                 self.scroll_tick = self.scroll_tick.wrapping_add(1);
-                // TODO: 更新播放进度
+            }
+            AppMessage::PlayerStateChanged(event) => {
+                match event {
+                    PlayerEvent::Playing => {
+                        self.player_bar.is_playing = true;
+                        self.player_bar.is_loading = false;
+                    }
+                    PlayerEvent::Paused => {
+                        self.player_bar.is_playing = false;
+                    }
+                    PlayerEvent::Stopped => {
+                        self.player_bar.is_playing = false;
+                        self.player_bar.title.clear();
+                        self.player_bar.artist.clear();
+                        self.player_bar.current_secs = 0;
+                        self.player_bar.total_secs = 0;
+                    }
+                    PlayerEvent::Progress { position_secs, duration_secs } => {
+                        self.player_bar.current_secs = position_secs;
+                        self.player_bar.total_secs = duration_secs;
+                    }
+                    PlayerEvent::TrackEnded => {
+                        self.play_next();
+                    }
+                    PlayerEvent::Error(msg) => {
+                        self.player_bar.is_loading = false;
+                        self.logs.push(LogLevel::Error, msg);
+                    }
+                    PlayerEvent::Loading => {
+                        self.player_bar.is_loading = true;
+                    }
+                }
+            }
+            AppMessage::AudioFetched { title, artist, duration_secs, data, cover_url } => {
+                self.player_bar.title = title;
+                self.player_bar.artist = artist;
+                self.player_bar.total_secs = duration_secs;
+                self.player_bar.current_secs = 0;
+                self.player_bar.is_loading = false;
+                self.player_bar.cover_url = cover_url.clone();
+                self.player.play(AudioSource::Buffered(data), duration_secs);
+                self.start_image_fetch(&cover_url);
+            }
+            AppMessage::AudioFetchError(err) => {
+                self.player_bar.is_loading = false;
+                self.logs.push(LogLevel::Error, err);
             }
             AppMessage::DataLoaded(payload) => match payload {
                 DataPayload::Songs(node, songs) => {
@@ -509,9 +705,12 @@ impl App {
                         self.song_cache.insert(node, songs);
                     }
                 }
+                DataPayload::Tags(tags) => {
+                    self.loading.remove(&NavNode::Categories);
+                    self.tag_cache = tags;
+                }
             },
             AppMessage::Error(err) => {
-                tracing::error!("{}", err);
                 self.logs.push(LogLevel::Error, err);
             }
             AppMessage::CaptchaGenerated(result) => {
@@ -519,7 +718,6 @@ impl App {
                     Ok((captcha_key, url)) => {
                         self.login.captcha_key = Some(captcha_key);
                         self.login.step = LoginStep::WaitingCaptcha;
-                        // 在浏览器中打开 captcha URL
                         let _ = open::that(&url);
                     }
                     Err(e) => {
@@ -535,6 +733,7 @@ impl App {
                             access_token: resp.token.access_token.clone(),
                             refresh_token: resp.token.refresh_token.clone(),
                             expires_at: resp.token.expires_in.timestamp(),
+                            username: Some(resp.username.clone()),
                         };
                         let _ = crate::config::auth_store::save(&auth);
                         self.client.set_auth(auth).await;
@@ -545,22 +744,165 @@ impl App {
                     }
                     Err(e) => {
                         self.login.error = Some(e);
-                        // 登录失败回到 captcha 等待（可能 captcha 还有效）
-                        // 若需要重新生成 captcha 则回到 Input
                         self.login.step = LoginStep::Input;
                         self.login.captcha_key = None;
                     }
                 }
             }
+            AppMessage::ImageFetched { url, img } => {
+                self.image_loading.remove(&url);
+                if let Some(picker) = &mut self.picker {
+                    let protocol = picker.new_resize_protocol(img);
+                    self.image_cache.insert(url, protocol);
+                }
+            }
         }
+    }
+
+    // — 播放控制方法 —
+
+    fn toggle_play_pause(&mut self) {
+        if self.player_bar.is_playing {
+            self.player.pause();
+        } else if self.player_bar.has_song() {
+            self.player.resume();
+        } else if let Some(song) = self.queue.current_song().cloned() {
+            self.start_audio_fetch(song.id, &song.name, &song.artist, song.duration_secs as u32);
+        }
+    }
+
+    fn play_next(&mut self) {
+        let mode = self.settings.player.default_play_mode.clone();
+        if let Some(item) = self.queue.next_with_mode(&mode).cloned() {
+            self.start_audio_fetch(item.id, &item.name, &item.artist, item.duration_secs as u32);
+        }
+    }
+
+    fn play_prev(&mut self) {
+        let mode = self.settings.player.default_play_mode.clone();
+        if let Some(item) = self.queue.prev_with_mode(&mode).cloned() {
+            self.start_audio_fetch(item.id, &item.name, &item.artist, item.duration_secs as u32);
+        }
+    }
+
+    /// 获取当前 Miller Columns 选中的歌曲
+    fn selected_song(&self) -> Option<&PublicSongDetail> {
+        let node = &self.nav.current().node;
+        let sel = self.nav.current().selected;
+        if !node.has_static_children() {
+            self.song_cache.get(node).and_then(|songs| songs.get(sel))
+        } else {
+            None
+        }
+    }
+
+    fn song_to_queue_item(song: &PublicSongDetail) -> MusicQueueItem {
+        MusicQueueItem {
+            id: song.id,
+            display_id: song.display_id.clone(),
+            name: song.title.clone(),
+            artist: song.uploader_name.clone(),
+            duration_secs: song.duration_seconds,
+            cover_url: song.cover_url.clone(),
+            explicit: song.explicit,
+            audio_url: song.audio_url.clone(),
+            gain: song.gain,
+        }
+    }
+
+    fn add_selected_to_queue(&mut self) {
+        if let Some(song) = self.selected_song().cloned() {
+            let item = Self::song_to_queue_item(&song);
+            self.queue.add(item);
+        }
+    }
+
+    /// 异步获取歌曲详情 → 下载音频 → 发送 AudioFetched
+    fn start_audio_fetch(&mut self, song_id: i64, title: &str, artist: &str, duration_secs: u32) {
+        self.player_bar.is_loading = true;
+        self.player_bar.title = title.to_string();
+        self.player_bar.artist = artist.to_string();
+
+        let tx = self.msg_tx.clone();
+        let client = self.client.clone();
+        let title = title.to_string();
+        let artist = artist.to_string();
+
+        tokio::spawn(async move {
+            // 第一步：获取歌曲详情拿到 audio_url
+            let detail = match client.song_detail_by_id(song_id).await {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = tx.send(AppMessage::AudioFetchError(
+                        format!("获取歌曲详情失败: {e}"),
+                    ));
+                    return;
+                }
+            };
+
+            let cover_url = detail.cover_url.clone();
+            let audio_url = &detail.audio_url;
+            if audio_url.is_empty() {
+                let _ = tx.send(AppMessage::AudioFetchError(
+                    "歌曲无音频地址".to_string(),
+                ));
+                return;
+            }
+
+            // 第二步：下载音频数据
+            match client.get_audio_stream(audio_url).await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        let body = resp.text().await.unwrap_or_default();
+                        let _ = tx.send(AppMessage::AudioFetchError(
+                            format!("音频请求返回 {status}: {body}"),
+                        ));
+                        return;
+                    }
+
+                    match resp.bytes().await {
+                        Ok(bytes) => {
+                            if bytes.is_empty() {
+                                let _ = tx.send(AppMessage::AudioFetchError(
+                                    "音频数据为空".to_string(),
+                                ));
+                                return;
+                            }
+                            let _ = tx.send(AppMessage::AudioFetched {
+                                title,
+                                artist,
+                                duration_secs,
+                                data: bytes.to_vec(),
+                                cover_url,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppMessage::AudioFetchError(
+                                format!("下载音频失败: {e}"),
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppMessage::AudioFetchError(
+                        format!("请求音频失败: {e}"),
+                    ));
+                }
+            }
+        });
     }
 
     // — Miller Columns 导航方法 —
 
     fn current_list_len(&self) -> usize {
         let node = &self.nav.current().node;
-        if node.has_static_children() {
+        if *node == NavNode::Settings {
+            crate::ui::settings_view::ITEMS_COUNT
+        } else if node.has_static_children() {
             node.children().len()
+        } else if *node == NavNode::Categories {
+            self.tag_cache.len()
         } else if let Some(songs) = self.song_cache.get(node) {
             songs.len()
         } else {
@@ -578,6 +920,7 @@ impl App {
             }
         }
         self.maybe_load_preview_data();
+        self.maybe_load_cover_image();
     }
 
     fn nav_up(&mut self) {
@@ -587,11 +930,18 @@ impl App {
             self.scroll_tick = 0;
         }
         self.maybe_load_preview_data();
+        self.maybe_load_cover_image();
     }
 
     fn nav_drill_in(&mut self) {
         let node = self.nav.current().node.clone();
         let sel = self.nav.current().selected;
+        if node == NavNode::Settings {
+            crate::ui::settings_view::cycle_setting(&mut self.settings, sel);
+            // 播放模式已直接修改 settings，无需同步
+            let _ = self.settings.save();
+            return;
+        }
         if node.has_static_children() {
             let children = node.children();
             if sel < children.len() {
@@ -602,6 +952,36 @@ impl App {
                 self.nav.push(child);
                 self.scroll_tick = 0;
                 self.maybe_load_preview_data();
+                self.maybe_load_cover_image();
+            }
+        } else if node == NavNode::Categories {
+            // 进入选中的标签
+            if let Some(tag_name) = self.tag_cache.get(sel).cloned() {
+                let tag_node = NavNode::Tag { name: tag_name };
+                self.load_node_data(&tag_node);
+                self.nav.push(tag_node);
+                self.scroll_tick = 0;
+                self.maybe_load_preview_data();
+                self.maybe_load_cover_image();
+            }
+        } else {
+            // 当前节点是歌曲列表，按 Enter 播放选中歌曲
+            if let Some(songs) = self.song_cache.get(&node).cloned() {
+                if sel < songs.len() {
+                    // 替换队列为当前列表所有歌曲
+                    self.queue.clear();
+                    for song in &songs {
+                        self.queue.add(Self::song_to_queue_item(song));
+                    }
+                    self.queue.current_index = Some(sel);
+
+                    // 播放选中歌曲
+                    let song = &songs[sel];
+                    self.start_audio_fetch(
+                        song.id, &song.title, &song.uploader_name,
+                        song.duration_seconds as u32,
+                    );
+                }
             }
         }
     }
@@ -610,12 +990,14 @@ impl App {
         self.nav.pop();
         self.scroll_tick = 0;
         self.maybe_load_preview_data();
+        self.maybe_load_cover_image();
     }
 
     fn nav_top(&mut self) {
         self.nav.current_mut().selected = 0;
         self.scroll_tick = 0;
         self.maybe_load_preview_data();
+        self.maybe_load_cover_image();
     }
 
     fn nav_bottom(&mut self) {
@@ -625,11 +1007,53 @@ impl App {
             self.scroll_tick = 0;
         }
         self.maybe_load_preview_data();
+        self.maybe_load_cover_image();
+    }
+
+    // — 图片加载 —
+
+    fn start_image_fetch(&mut self, url: &str) {
+        if url.is_empty() || self.image_cache.contains_key(url) || self.image_loading.contains(url) {
+            return;
+        }
+        self.image_loading.insert(url.to_string());
+        let tx = self.msg_tx.clone();
+        let client = self.client.clone();
+        let url = url.to_string();
+
+        tokio::spawn(async move {
+            let resp = match client.get_audio_stream(&url).await {
+                Ok(r) if r.status().is_success() => r,
+                _ => return,
+            };
+            let bytes = match resp.bytes().await {
+                Ok(b) => b,
+                _ => return,
+            };
+            // 图片解码在 blocking 线程池执行，避免阻塞主循环
+            let data = bytes.to_vec();
+            let decoded = tokio::task::spawn_blocking(move || {
+                image::load_from_memory(&data).ok()
+            })
+            .await;
+            if let Ok(Some(img)) = decoded {
+                let _ = tx.send(AppMessage::ImageFetched { url, img });
+            }
+        });
+    }
+
+    fn maybe_load_cover_image(&mut self) {
+        if let Some(song) = self.selected_song().cloned() {
+            if !song.cover_url.is_empty() {
+                let url = song.cover_url.clone();
+                self.start_image_fetch(&url);
+            }
+        }
     }
 
     // — 渲染 —
 
-    fn render(&self, frame: &mut Frame) {
+    fn render(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -648,6 +1072,8 @@ impl App {
             _ => {
                 if self.player_expanded {
                     self.render_player_view(frame, chunks[1]);
+                } else if self.nav.current().node == NavNode::Settings {
+                    self.render_settings(frame, chunks[1]);
                 } else {
                     self.render_miller(frame, chunks[1]);
                 }
@@ -666,9 +1092,11 @@ impl App {
     }
 
     fn render_header(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        use ratatui::layout::{Alignment, Constraint as C, Direction as D, Layout as L};
+        use ratatui::layout::Alignment;
+        use ratatui::style::{Color, Style};
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
+        use unicode_width::UnicodeWidthStr;
 
         let status = if let Some(name) = &self.username {
             Span::styled(
@@ -677,47 +1105,80 @@ impl App {
             )
         } else if self.client.is_authenticated_sync() {
             Span::styled(
-                "  logged in",
+                format!("  {}", t!("app.logged_in")),
                 crate::ui::theme::Theme::secondary(),
             )
         } else {
             Span::styled(
-                "  anonymous",
+                format!("  {}", t!("app.anonymous")),
                 crate::ui::theme::Theme::secondary(),
             )
         };
 
         let title_span = Span::styled("  HACHIMI", crate::ui::theme::Theme::title());
-        let left = Line::from(vec![title_span, status]);
-        let header = Paragraph::new(left);
+
+        // 右侧色块段
+        let mode_str = match self.settings.player.default_play_mode {
+            PlayMode::Sequential => " [>] ",
+            PlayMode::Shuffle => " [x] ",
+            PlayMode::RepeatOne => " [1] ",
+        };
+        let vol_str = if self.is_muted {
+            " vol -- ".to_string()
+        } else {
+            format!(" vol {}% ", self.volume)
+        };
+        let now = chrono::Local::now();
+        let time_str = now.format(" %H:%M ").to_string();
+
+        let block_bg = Style::default().fg(Color::Black).bg(Color::DarkGray);
+        let block_accent = Style::default().fg(Color::Black).bg(Color::Cyan);
+
+        let mut right_spans: Vec<Span> = Vec::new();
 
         if self.logs.unread_count > 0 {
-            let cols = L::default()
-                .direction(D::Horizontal)
-                .constraints([C::Min(1), C::Length(8)])
-                .split(area);
-
-            frame.render_widget(header, cols[0]);
-
-            let badge = Paragraph::new(Line::from(Span::styled(
-                format!("⚠ {} ", self.logs.unread_count),
-                crate::ui::theme::Theme::error(),
-            )))
-            .alignment(Alignment::Right);
-            frame.render_widget(badge, cols[1]);
-        } else {
-            frame.render_widget(header, area);
+            right_spans.push(Span::styled(
+                format!(" ! {} ", self.logs.unread_count),
+                Style::default().fg(Color::White).bg(Color::Red),
+            ));
         }
+        right_spans.push(Span::styled(mode_str, block_bg));
+        right_spans.push(Span::styled(vol_str, block_accent));
+        right_spans.push(Span::styled(time_str.clone(), block_bg));
+
+        let right_width: u16 = right_spans
+            .iter()
+            .map(|s| s.content.width() as u16)
+            .sum();
+
+        // 左侧
+        let left = Line::from(vec![title_span, status]);
+        let left_p = Paragraph::new(left);
+
+        let right_p = Paragraph::new(Line::from(right_spans))
+            .alignment(Alignment::Right);
+
+        use ratatui::layout::{Constraint as C, Direction as D, Layout as L};
+        let cols = L::default()
+            .direction(D::Horizontal)
+            .constraints([C::Min(1), C::Length(right_width)])
+            .split(area);
+
+        frame.render_widget(left_p, cols[0]);
+        frame.render_widget(right_p, cols[1]);
     }
 
-    fn render_miller(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_miller(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
         crate::ui::miller::render(
             frame,
             area,
             &self.nav,
             &self.song_cache,
+            &self.tag_cache,
             &self.loading,
             self.scroll_tick,
+            &self.settings,
+            &mut self.image_cache,
         );
     }
 
@@ -725,7 +1186,53 @@ impl App {
         crate::ui::player_bar::render(frame, area, &self.player_bar);
     }
 
-    fn render_player_view(&self, _frame: &mut Frame, _area: ratatui::layout::Rect) {
-        // TODO: 展开播放器视图
+    fn render_settings(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        use ratatui::layout::{Constraint as C, Direction as D, Layout as L};
+        use ratatui::style::{Modifier, Style};
+        use ratatui::widgets::{List, ListItem};
+
+        let cols = L::default()
+            .direction(D::Horizontal)
+            .constraints([
+                C::Percentage(15),
+                C::Percentage(45),
+                C::Percentage(40),
+            ])
+            .split(area);
+
+        // Left: Root's children as parent column
+        if let Some(parent) = self.nav.parent() {
+            let children = parent.node.children();
+            let items: Vec<ListItem> = children
+                .iter()
+                .enumerate()
+                .map(|(i, child)| {
+                    let style = if i == parent.selected {
+                        crate::ui::theme::Theme::secondary().add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+                    ListItem::new(format!(" {}", child.display_name())).style(style)
+                })
+                .collect();
+            let list = List::new(items);
+            frame.render_widget(list, cols[0]);
+        }
+
+        // Center: settings items
+        let selected = self.nav.current().selected;
+        crate::ui::settings_view::render_list(frame, cols[1], &self.settings, selected);
+
+        // Right: hint
+        crate::ui::settings_view::render_hint(frame, cols[2]);
+    }
+
+    fn render_player_view(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        crate::ui::player_view::render(
+            frame,
+            area,
+            &self.player_bar,
+            &mut self.image_cache,
+        );
     }
 }

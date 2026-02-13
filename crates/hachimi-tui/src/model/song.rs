@@ -141,4 +141,31 @@ impl SearchSongItem {
         let secs = self.duration_seconds % 60;
         format!("{mins}:{secs:02}")
     }
+
+    pub fn into_song_detail(self) -> PublicSongDetail {
+        PublicSongDetail {
+            id: self.id,
+            display_id: self.display_id,
+            title: self.title,
+            subtitle: self.subtitle,
+            description: self.description,
+            duration_seconds: self.duration_seconds,
+            tags: vec![],
+            lyrics: String::new(),
+            audio_url: self.audio_url,
+            cover_url: self.cover_art_url,
+            production_crew: vec![],
+            creation_type: 0,
+            origin_infos: vec![],
+            uploader_uid: self.uploader_uid,
+            uploader_name: self.uploader_name,
+            play_count: self.play_count,
+            like_count: self.like_count,
+            external_links: vec![],
+            create_time: chrono::Utc::now(),
+            release_time: chrono::Utc::now(),
+            explicit: self.explicit,
+            gain: None,
+        }
+    }
 }

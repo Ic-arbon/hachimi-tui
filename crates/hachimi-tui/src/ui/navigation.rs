@@ -35,27 +35,27 @@ pub enum NavNode {
 impl NavNode {
     pub fn display_name(&self) -> &str {
         match self {
-            Self::Root => "Root",
-            Self::Home => "Home",
-            Self::Search => "Search",
-            Self::Library => "Library",
-            Self::Queue => "Queue",
-            Self::Settings => "Settings",
-            Self::LatestReleases => "Latest",
-            Self::DailyRecommend => "Daily",
-            Self::WeeklyHot => "Weekly",
-            Self::Categories => "Categories",
-            Self::MyPlaylists => "Playlists",
-            Self::Favorites => "Favorites",
-            Self::History => "History",
+            Self::Root => t!("nav.root"),
+            Self::Home => t!("nav.home"),
+            Self::Search => t!("nav.search"),
+            Self::Library => t!("nav.library"),
+            Self::Queue => t!("nav.queue"),
+            Self::Settings => t!("nav.settings"),
+            Self::LatestReleases => t!("nav.latest"),
+            Self::DailyRecommend => t!("nav.daily"),
+            Self::WeeklyHot => t!("nav.weekly"),
+            Self::Categories => t!("nav.categories"),
+            Self::MyPlaylists => t!("nav.playlists"),
+            Self::Favorites => t!("nav.favorites"),
+            Self::History => t!("nav.history"),
             Self::SongList { title } => title,
-            Self::SongDetail { .. } => "Detail",
-            Self::TagList => "Tags",
+            Self::SongDetail { .. } => t!("nav.detail"),
+            Self::TagList => t!("nav.tags"),
             Self::Tag { name } => name,
-            Self::PlaylistDetail { .. } => "Playlist",
-            Self::UserDetail { .. } => "User",
-            Self::SearchResults => "Results",
-            Self::SettingsPage => "Settings",
+            Self::PlaylistDetail { .. } => t!("nav.playlist"),
+            Self::UserDetail { .. } => t!("nav.user"),
+            Self::SearchResults => t!("nav.results"),
+            Self::SettingsPage => t!("nav.settings_page"),
         }
     }
 
@@ -86,7 +86,11 @@ impl NavNode {
     pub fn needs_dynamic_data(&self) -> bool {
         matches!(
             self,
-            Self::LatestReleases | Self::DailyRecommend | Self::WeeklyHot
+            Self::LatestReleases
+                | Self::DailyRecommend
+                | Self::WeeklyHot
+                | Self::Categories
+                | Self::Tag { .. }
         )
     }
 }
@@ -175,11 +179,11 @@ pub enum SearchType {
 }
 
 impl SearchType {
-    pub fn label(&self) -> &str {
+    pub fn label(&self) -> &'static str {
         match self {
-            Self::Song => "song",
-            Self::User => "user",
-            Self::Playlist => "playlist",
+            Self::Song => t!("search.song"),
+            Self::User => t!("search.user"),
+            Self::Playlist => t!("search.playlist"),
         }
     }
 
@@ -201,11 +205,11 @@ pub enum SearchSort {
 }
 
 impl SearchSort {
-    pub fn label(&self) -> &str {
+    pub fn label(&self) -> &'static str {
         match self {
-            Self::Relevance => "relevance",
-            Self::Newest => "newest",
-            Self::Oldest => "oldest",
+            Self::Relevance => t!("sort.relevance"),
+            Self::Newest => t!("sort.newest"),
+            Self::Oldest => t!("sort.oldest"),
         }
     }
 

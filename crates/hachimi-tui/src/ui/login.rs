@@ -1,12 +1,20 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
 
 use super::theme::Theme;
+
+const LOGO: &[&str] = &[
+    "_|    _|    _|_|      _|_|_|  _|    _|  _|_|_|  _|      _|  _|_|_|",
+    "_|    _|  _|    _|  _|        _|    _|    _|    _|_|  _|_|    _|",
+    "_|_|_|_|  _|_|_|_|  _|        _|_|_|_|    _|    _|  _|  _|    _|",
+    "_|    _|  _|    _|  _|        _|    _|    _|    _|      _|    _|",
+    "_|    _|  _|    _|    _|_|_|  _|    _|  _|_|_|  _|      _|  _|_|_|",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginField {
@@ -75,19 +83,51 @@ impl LoginState {
 
 /// 渲染登录表单（居中显示在主内容区）
 pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
-    // 垂直居中
-    let form_height = 16u16;
-    let v_pad = area.height.saturating_sub(form_height) / 2;
+    let logo_height = LOGO.len() as u16;
+    let form_height = 12u16; // 标题(2)+邮箱(2)+空(1)+密码(2)+空(1)+提示(2)+空(1)+错误(1) 去掉多余=12
+    let total_height = logo_height + 3 + form_height;
+    let v_pad = area.height.saturating_sub(total_height) / 2;
+
     let v_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(v_pad),
+            Constraint::Length(logo_height),
+            Constraint::Length(3), // logo 与表单间距
             Constraint::Length(form_height),
             Constraint::Min(0),
         ])
         .split(area);
 
-    // 水平居中，表单宽度 44
+    // Logo 全宽居中（水平渐变：cyan → magenta）
+    let max_logo_len = LOGO.iter().map(|s| s.len()).max().unwrap_or(0);
+    let logo_lines: Vec<Line> = LOGO
+        .iter()
+        .map(|text| {
+            let padded = format!("{:<width$}", text, width = max_logo_len);
+            let len = padded.len().max(1) as f64;
+            let spans: Vec<Span> = padded
+                .chars()
+                .enumerate()
+                .map(|(i, c)| {
+                    let t = i as f64 / (len - 1.0);
+                    let r = (100.0 + 155.0 * t) as u8;
+                    let g = (220.0 * (1.0 - t)) as u8;
+                    Span::styled(
+                        c.to_string(),
+                        Style::default().fg(Color::Rgb(r, g, 255)),
+                    )
+                })
+                .collect();
+            Line::from(spans)
+        })
+        .collect();
+    frame.render_widget(
+        Paragraph::new(logo_lines).alignment(Alignment::Center),
+        v_layout[1],
+    );
+
+    // 表单水平居中，宽度 44
     let form_width = 44u16.min(area.width.saturating_sub(4));
     let h_pad = area.width.saturating_sub(form_width) / 2;
     let h_layout = Layout::default()
@@ -97,7 +137,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
             Constraint::Length(form_width),
             Constraint::Min(0),
         ])
-        .split(v_layout[1]);
+        .split(v_layout[3]);
 
     let form_area = h_layout[1];
 
@@ -121,7 +161,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
 
     // 标题
     let title = Paragraph::new(Line::from(Span::styled(
-        "LOGIN",
+        t!("login.title"),
         Style::default().add_modifier(Modifier::BOLD),
     )));
     frame.render_widget(title, rows[0]);
@@ -134,7 +174,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
     } else {
         Theme::secondary()
     };
-    let email_label = Paragraph::new(Span::styled("Email", email_label_style));
+    let email_label = Paragraph::new(Span::styled(t!("login.email"), email_label_style));
     frame.render_widget(email_label, rows[1]);
 
     let email_line = build_input_line(
@@ -151,7 +191,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
     } else {
         Theme::secondary()
     };
-    let pw_label = Paragraph::new(Span::styled("Password", pw_label_style));
+    let pw_label = Paragraph::new(Span::styled(t!("login.password"), pw_label_style));
     frame.render_widget(pw_label, rows[4]);
 
     let pw_line = build_input_line(
@@ -167,33 +207,33 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
         LoginStep::Input => {
             let hint = Line::from(vec![
                 Span::styled("[Enter]", Theme::highlight()),
-                Span::raw(" Login  "),
+                Span::raw(format!(" {}  ", t!("login.hint_login"))),
                 Span::styled("[q]", Theme::secondary()),
-                Span::raw(" Quit"),
+                Span::raw(format!(" {}", t!("login.hint_quit"))),
             ]);
             frame.render_widget(Paragraph::new(hint), rows[7]);
         }
         LoginStep::GeneratingCaptcha => {
             let hint = Line::from(Span::styled(
-                "Generating captcha...",
+                t!("login.generating_captcha"),
                 Theme::active(),
             ));
             frame.render_widget(Paragraph::new(hint), rows[7]);
         }
         LoginStep::WaitingCaptcha => {
             let hint1 = Line::from(Span::styled(
-                "Captcha opened in browser",
+                t!("login.captcha_opened"),
                 Theme::active(),
             ));
             let hint2 = Line::from(vec![
                 Span::styled("[Enter]", Theme::highlight()),
-                Span::raw(" Continue after completing captcha"),
+                Span::raw(format!(" {}", t!("login.continue_captcha"))),
             ]);
             frame.render_widget(Paragraph::new(hint1), rows[7]);
             frame.render_widget(Paragraph::new(hint2), rows[8]);
         }
         LoginStep::Submitting => {
-            let hint = Line::from(Span::styled("Logging in...", Theme::active()));
+            let hint = Line::from(Span::styled(t!("login.logging_in"), Theme::active()));
             frame.render_widget(Paragraph::new(hint), rows[7]);
         }
     }
