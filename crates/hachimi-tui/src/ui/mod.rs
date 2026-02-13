@@ -1,4 +1,5 @@
 pub mod help;
+pub mod log_view;
 pub mod login;
 pub mod miller;
 pub mod navigation;

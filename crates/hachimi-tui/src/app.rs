@@ -19,6 +19,7 @@ use crate::api::endpoints::RecentQuery;
 use crate::config::settings::Settings;
 use crate::model::auth::LoginReq;
 use crate::model::song::PublicSongDetail;
+use crate::ui::log_view::{LogLevel, LogStore};
 use crate::ui::login::{LoginState, LoginStep};
 use crate::ui::navigation::{NavNode, NavStack, SearchState};
 use crate::ui::player_bar::PlayerBarState;
@@ -63,6 +64,8 @@ pub struct App {
     pub player_bar: PlayerBarState,
     pub login: LoginState,
     pub show_help: bool,
+    pub show_logs: bool,
+    pub logs: LogStore,
     pub username: Option<String>,
     pub song_cache: HashMap<NavNode, Vec<PublicSongDetail>>,
     loading: HashSet<NavNode>,
@@ -106,6 +109,8 @@ impl App {
             },
             login: LoginState::new(),
             show_help: false,
+            show_logs: false,
+            logs: LogStore::new(),
             username: None,
             song_cache: HashMap::new(),
             loading: HashSet::new(),
@@ -184,6 +189,17 @@ impl App {
                 return;
             }
 
+            // 日志浮层打开时，只响应滚动和关闭
+            if self.show_logs {
+                match key.code {
+                    KeyCode::Char('!') | KeyCode::Esc => self.show_logs = false,
+                    KeyCode::Char('j') | KeyCode::Down => self.logs.scroll_down(),
+                    KeyCode::Char('k') | KeyCode::Up => self.logs.scroll_up(),
+                    _ => {}
+                }
+                return;
+            }
+
             match self.input_mode {
                 InputMode::Normal => self.handle_normal_key(key),
                 InputMode::Search => self.handle_search_key(key),
@@ -200,6 +216,10 @@ impl App {
             }
             (_, KeyCode::Char('?')) => {
                 self.show_help = true;
+            }
+            (_, KeyCode::Char('!')) => {
+                self.show_logs = true;
+                self.logs.mark_read();
             }
             (_, KeyCode::Char('L')) => {
                 self.logout();
@@ -492,6 +512,7 @@ impl App {
             },
             AppMessage::Error(err) => {
                 tracing::error!("{}", err);
+                self.logs.push(LogLevel::Error, err);
             }
             AppMessage::CaptchaGenerated(result) => {
                 match result {
@@ -635,12 +656,17 @@ impl App {
 
         self.render_player_bar(frame, chunks[2]);
 
+        if self.show_logs {
+            crate::ui::log_view::render(frame, frame.area(), &self.logs);
+        }
+
         if self.show_help {
             crate::ui::help::render(frame, frame.area());
         }
     }
 
     fn render_header(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
+        use ratatui::layout::{Alignment, Constraint as C, Direction as D, Layout as L};
         use ratatui::text::{Line, Span};
         use ratatui::widgets::Paragraph;
 
@@ -662,9 +688,26 @@ impl App {
         };
 
         let title_span = Span::styled("  HACHIMI", crate::ui::theme::Theme::title());
-        let line = Line::from(vec![title_span, status]);
-        let header = Paragraph::new(line);
-        frame.render_widget(header, area);
+        let left = Line::from(vec![title_span, status]);
+        let header = Paragraph::new(left);
+
+        if self.logs.unread_count > 0 {
+            let cols = L::default()
+                .direction(D::Horizontal)
+                .constraints([C::Min(1), C::Length(8)])
+                .split(area);
+
+            frame.render_widget(header, cols[0]);
+
+            let badge = Paragraph::new(Line::from(Span::styled(
+                format!("⚠ {} ", self.logs.unread_count),
+                crate::ui::theme::Theme::error(),
+            )))
+            .alignment(Alignment::Right);
+            frame.render_widget(badge, cols[1]);
+        } else {
+            frame.render_widget(header, area);
+        }
     }
 
     fn render_miller(&self, frame: &mut Frame, area: ratatui::layout::Rect) {

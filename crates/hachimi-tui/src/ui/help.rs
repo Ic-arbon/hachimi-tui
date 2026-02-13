@@ -22,6 +22,7 @@ const HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
             ("v", "Toggle player view"),
             ("/", "Search"),
             ("?", "This help"),
+            ("!", "Show logs"),
             ("L", "Logout"),
         ],
     ),
