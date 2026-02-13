@@ -11,6 +11,20 @@ pub enum Lang {
 
 impl Default for Lang {
     fn default() -> Self {
+        Self::detect_system()
+    }
+}
+
+impl Lang {
+    /// 从系统环境变量检测语言，首次启动时使用
+    fn detect_system() -> Self {
+        for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+            if let Ok(val) = std::env::var(var) {
+                if val.starts_with("zh") {
+                    return Lang::Zh;
+                }
+            }
+        }
         Lang::En
     }
 }
@@ -83,6 +97,7 @@ fn tr_en(key: &str) -> &'static str {
         "help.drill_out" => "Drill out",
         "help.top_bottom" => "Top / Bottom",
         "help.add_queue" => "Add to queue",
+        "help.open_link" => "Open external link",
         "help.add_playlist" => "Add to playlist",
         "help.switch_type" => "Switch type",
         "help.switch_sort" => "Switch sort",
@@ -110,6 +125,11 @@ fn tr_en(key: &str) -> &'static str {
         // miller
         "miller.no_songs" => "No songs",
         "miller.loading" => "Loading...",
+        "miller.origin" => "Original",
+        "miller.release_date" => "Released",
+        "miller.crew" => "Credits",
+        "miller.links" => "Links",
+        "miller.links_hint" => "o to open",
 
         // navigation
         "nav.root" => "Root",
@@ -182,6 +202,7 @@ fn tr_zh(key: &str) -> &'static str {
         "help.drill_out" => "返回",
         "help.top_bottom" => "顶部 / 底部",
         "help.add_queue" => "加入队列",
+        "help.open_link" => "打开外部链接",
         "help.add_playlist" => "加入歌单",
         "help.switch_type" => "切换类型",
         "help.switch_sort" => "切换排序",
@@ -209,6 +230,11 @@ fn tr_zh(key: &str) -> &'static str {
         // miller
         "miller.no_songs" => "暂无歌曲",
         "miller.loading" => "加载中...",
+        "miller.origin" => "原作",
+        "miller.release_date" => "发行日期",
+        "miller.crew" => "创作团队",
+        "miller.links" => "外部链接",
+        "miller.links_hint" => "按 o 打开",
 
         // navigation
         "nav.root" => "根",

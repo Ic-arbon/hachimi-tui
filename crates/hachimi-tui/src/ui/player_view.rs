@@ -11,6 +11,7 @@ use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
 use super::player_bar::PlayerBarState;
 use super::theme::Theme;
+use crate::model::song::PublicSongDetail;
 
 /// 渲染展开播放器视图
 pub fn render(
@@ -18,6 +19,9 @@ pub fn render(
     area: Rect,
     player_bar: &PlayerBarState,
     image_cache: &mut HashMap<String, StatefulProtocol>,
+    current_detail: Option<&PublicSongDetail>,
+    font_size: (u16, u16),
+    last_image_rect: &mut Rect,
 ) {
     if !player_bar.has_song() {
         let hint = Paragraph::new(Span::styled(
@@ -32,12 +36,26 @@ pub fn render(
         && image_cache.contains_key(&player_bar.cover_url);
 
     let (cover_area, info_area) = if has_cover {
-        let cover_width = area.width.min(area.height * 2).min(40);
+        let (fw, fh) = font_size;
+        // 像素精确对齐的视觉正方形封面
+        let max_w = (area.width / 2).min(40);
+        let max_h = area.height;
+        let (cover_width, cover_height) =
+            super::util::square_cells(max_w, max_h, fw, fh);
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(cover_width), Constraint::Min(1)])
             .split(area);
-        (Some(cols[0]), cols[1])
+        // 封面在左栏内垂直居中
+        let y_offset = area.height.saturating_sub(cover_height) / 2;
+        let img_rect = Rect {
+            x: cols[0].x,
+            y: cols[0].y + y_offset,
+            width: cover_width,
+            height: cover_height,
+        };
+        *last_image_rect = img_rect;
+        (Some(img_rect), cols[1])
     } else {
         (None, area)
     };
@@ -70,7 +88,7 @@ pub fn render(
         "⏸"
     };
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             player_bar.title.clone(),
             Style::default().add_modifier(Modifier::BOLD),
@@ -85,6 +103,19 @@ pub fn render(
             Theme::active(),
         )),
     ];
+
+    // 歌词
+    if let Some(detail) = current_detail {
+        if !detail.lyrics.is_empty() {
+            lines.push(Line::from(""));
+            for line in detail.lyrics.lines() {
+                lines.push(Line::from(Span::styled(
+                    line.to_string(),
+                    Theme::secondary(),
+                )));
+            }
+        }
+    }
 
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, inner);

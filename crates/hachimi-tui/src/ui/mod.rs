@@ -10,3 +10,4 @@ pub mod player_bar;
 pub mod player_view;
 pub mod settings_view;
 pub mod theme;
+pub mod util;

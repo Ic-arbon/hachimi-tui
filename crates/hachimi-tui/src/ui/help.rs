@@ -20,7 +20,7 @@ fn help_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("> / <", t!("help.seek")),
                 ("s", t!("help.play_mode")),
                 ("v", t!("help.player_view")),
-                ("/", t!("help.search")),
+                // ("/", t!("help.search")),  // TODO: 搜索功能尚未实现
                 ("?", t!("help.help")),
                 ("!", t!("help.logs")),
                 ("L", t!("help.logout")),
@@ -34,17 +34,19 @@ fn help_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("h", t!("help.drill_out")),
                 ("g / G", t!("help.top_bottom")),
                 ("a", t!("help.add_queue")),
-                ("p", t!("help.add_playlist")),
+                ("o", t!("help.open_link")),
+                // ("p", t!("help.add_playlist")),  // TODO: 歌单功能尚未实现
             ],
         ),
-        (
-            t!("help.section.search"),
-            vec![
-                ("Tab", t!("help.switch_type")),
-                ("Ctrl+s", t!("help.switch_sort")),
-                ("Esc", t!("help.exit_search")),
-            ],
-        ),
+        // TODO: 搜索功能尚未实现
+        // (
+        //     t!("help.section.search"),
+        //     vec![
+        //         ("Tab", t!("help.switch_type")),
+        //         ("Ctrl+s", t!("help.switch_sort")),
+        //         ("Esc", t!("help.exit_search")),
+        //     ],
+        // ),
     ]
 }
 

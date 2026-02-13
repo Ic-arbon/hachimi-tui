@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use rodio::{Decoder, OutputStream, Sink};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
 
 /// 播放引擎发给 UI 的事件
 #[derive(Debug, Clone)]
@@ -37,19 +37,19 @@ pub enum AudioSource {
 
 pub struct PlayerEngine {
     cmd_tx: mpsc::UnboundedSender<PlayerCommand>,
-    event_rx: watch::Receiver<PlayerEvent>,
+    event_rx: Option<mpsc::UnboundedReceiver<PlayerEvent>>,
 }
 
 impl PlayerEngine {
     pub fn spawn() -> Result<Self> {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        let (event_tx, event_rx) = watch::channel(PlayerEvent::Stopped);
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
 
         std::thread::spawn(move || {
             player_thread(cmd_rx, event_tx);
         });
 
-        Ok(Self { cmd_tx, event_rx })
+        Ok(Self { cmd_tx, event_rx: Some(event_rx) })
     }
 
     pub fn play(&self, source: AudioSource, duration_secs: u32) {
@@ -76,14 +76,14 @@ impl PlayerEngine {
         let _ = self.cmd_tx.send(PlayerCommand::SetVolume(volume));
     }
 
-    pub fn subscribe(&self) -> watch::Receiver<PlayerEvent> {
-        self.event_rx.clone()
+    pub fn take_event_receiver(&mut self) -> mpsc::UnboundedReceiver<PlayerEvent> {
+        self.event_rx.take().expect("event receiver already taken")
     }
 }
 
 fn player_thread(
     mut cmd_rx: mpsc::UnboundedReceiver<PlayerCommand>,
-    event_tx: watch::Sender<PlayerEvent>,
+    event_tx: mpsc::UnboundedSender<PlayerEvent>,
 ) {
     let Ok((_stream, stream_handle)) = OutputStream::try_default() else {
         let _ = event_tx.send(PlayerEvent::Error("无法打开音频输出设备".to_string()));

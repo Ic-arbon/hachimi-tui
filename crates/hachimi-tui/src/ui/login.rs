@@ -9,11 +9,9 @@ use ratatui::{
 use super::theme::Theme;
 
 const LOGO: &[&str] = &[
-    "_|    _|    _|_|      _|_|_|  _|    _|  _|_|_|  _|      _|  _|_|_|",
-    "_|    _|  _|    _|  _|        _|    _|    _|    _|_|  _|_|    _|",
-    "_|_|_|_|  _|_|_|_|  _|        _|_|_|_|    _|    _|  _|  _|    _|",
-    "_|    _|  _|    _|  _|        _|    _|    _|    _|      _|    _|",
-    "_|    _|  _|    _|    _|_|_|  _|    _|  _|_|_|  _|      _|  _|_|_|",
+    "░█░█░█▀█░█▀▀░█░█░▀█▀░█▄█░▀█▀",
+    "░█▀█░█▀█░█░░░█▀█░░█░░█░█░░█░",
+    "░▀░▀░▀░▀░▀▀▀░▀░▀░▀▀▀░▀░▀░▀▀▀",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,27 +97,14 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
         ])
         .split(area);
 
-    // Logo 全宽居中（水平渐变：cyan → magenta）
-    let max_logo_len = LOGO.iter().map(|s| s.len()).max().unwrap_or(0);
+    // Logo 全宽居中（纯 Cyan，与整体配色统一）
     let logo_lines: Vec<Line> = LOGO
         .iter()
         .map(|text| {
-            let padded = format!("{:<width$}", text, width = max_logo_len);
-            let len = padded.len().max(1) as f64;
-            let spans: Vec<Span> = padded
-                .chars()
-                .enumerate()
-                .map(|(i, c)| {
-                    let t = i as f64 / (len - 1.0);
-                    let r = (100.0 + 155.0 * t) as u8;
-                    let g = (220.0 * (1.0 - t)) as u8;
-                    Span::styled(
-                        c.to_string(),
-                        Style::default().fg(Color::Rgb(r, g, 255)),
-                    )
-                })
-                .collect();
-            Line::from(spans)
+            Line::from(Span::styled(
+                text.to_string(),
+                Style::default().fg(Color::Cyan),
+            ))
         })
         .collect();
     frame.render_widget(

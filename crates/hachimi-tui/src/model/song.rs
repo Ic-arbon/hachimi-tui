@@ -25,6 +25,9 @@ pub struct PublicSongDetail {
     pub release_time: DateTime<Utc>,
     pub explicit: Option<bool>,
     pub gain: Option<f32>,
+    /// 标记是否由搜索结果转换而来（缺少歌词、制作团队等完整详情）
+    #[serde(default)]
+    pub partial: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +169,7 @@ impl SearchSongItem {
             release_time: chrono::Utc::now(),
             explicit: self.explicit,
             gain: None,
+            partial: true,
         }
     }
 }
