@@ -1,0 +1,12 @@
+[package]
+name = "hachimi-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+chrono.workspace = true
+anyhow.workspace = true

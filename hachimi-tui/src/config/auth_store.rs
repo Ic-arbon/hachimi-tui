@@ -1,23 +1,8 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+
+pub use hachimi_core::AuthData;
 
 use super::paths;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AuthData {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_at: i64,
-    #[serde(default)]
-    pub username: Option<String>,
-}
-
-impl AuthData {
-    pub fn is_expired(&self) -> bool {
-        let now = chrono::Utc::now().timestamp();
-        now >= self.expires_at
-    }
-}
 
 pub fn load() -> Result<Option<AuthData>> {
     let path = paths::auth_file()?;

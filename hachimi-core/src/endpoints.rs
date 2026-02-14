@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use super::client::HachimiClient;
+use crate::client::HachimiClient;
 use crate::model::{
     auth::*,
     play_history::*,

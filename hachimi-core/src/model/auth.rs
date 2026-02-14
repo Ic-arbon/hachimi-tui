@@ -1,6 +1,23 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+/// 本地持久化的认证数据（access_token + refresh_token + 过期时间戳）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthData {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: i64,
+    #[serde(default)]
+    pub username: Option<String>,
+}
+
+impl AuthData {
+    pub fn is_expired(&self) -> bool {
+        let now = chrono::Utc::now().timestamp();
+        now >= self.expires_at
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenPair {
     pub access_token: String,

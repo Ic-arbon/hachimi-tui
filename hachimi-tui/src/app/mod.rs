@@ -19,7 +19,7 @@ use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use tokio::sync::mpsc;
 
-use crate::api::client::HachimiClient;
+use hachimi_core::HachimiClient;
 use crate::config::settings::Settings;
 use crate::model::playlist::{PlaylistItem, PlaylistMetadata};
 use crate::model::queue::QueueState;
@@ -168,7 +168,16 @@ impl App {
         let (has_auth, saved_username) = if let Ok(Some(auth)) = crate::config::auth_store::load() {
             let name = auth.username.clone();
             client.set_auth(auth.clone()).await;
-            client.ensure_valid_auth().await;
+            if let Some(event) = client.ensure_valid_auth().await {
+                match event {
+                    hachimi_core::AuthEvent::Refreshed(data) => {
+                        let _ = crate::config::auth_store::save(&data);
+                    }
+                    hachimi_core::AuthEvent::Cleared => {
+                        let _ = crate::config::auth_store::clear();
+                    }
+                }
+            }
             let authenticated = client.is_authenticated().await;
             // 旧 auth 文件可能没有 username，从 JWT 提取 uid 后调 API 获取
             let name = if name.is_none() && authenticated {

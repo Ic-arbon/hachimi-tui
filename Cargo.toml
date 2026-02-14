@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["hachimi-core", "hachimi-tui"]
 resolver = "2"
 
 [workspace.package]

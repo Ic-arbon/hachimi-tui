@@ -1,9 +1,7 @@
-mod api;
 mod config;
 mod player;
 #[macro_use]
 mod ui;
-
 mod app;
 mod model;
 

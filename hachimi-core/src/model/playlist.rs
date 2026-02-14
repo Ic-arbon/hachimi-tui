@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::song::PublicSongDetail;
 use super::user::PublicUserProfile;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,8 +114,8 @@ impl PlaylistSongItem {
         format!("{mins}:{secs:02}")
     }
 
-    pub fn into_song_detail(self) -> crate::model::song::PublicSongDetail {
-        crate::model::song::PublicSongDetail {
+    pub fn into_song_detail(self) -> PublicSongDetail {
+        PublicSongDetail {
             id: self.song_id,
             display_id: self.song_display_id,
             title: self.title,

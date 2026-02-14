@@ -1,4 +1,4 @@
-use crate::api::endpoints::{
+use hachimi_core::endpoints::{
     HistoryCursorQuery, PageByUserQuery, PlaylistSearchQuery, RecentQuery, SongSearchQuery,
     UserSearchQuery,
 };

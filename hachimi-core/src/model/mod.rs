@@ -1,6 +1,5 @@
 pub mod auth;
 pub mod playlist;
-pub mod queue;
 pub mod song;
 pub mod user;
 
