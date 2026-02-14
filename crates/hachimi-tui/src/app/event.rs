@@ -10,6 +10,10 @@ use crate::ui::navigation::NavNode;
 
 use super::{App, AppMessage, DataPayload, InputMode};
 
+const VOLUME_STEP: u8 = 5;
+const MAX_VOLUME: u8 = 100;
+const SEEK_STEP_SECS: u32 = 5;
+
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event) {
         if let Event::Key(key) = event {
@@ -18,6 +22,13 @@ impl App {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Esc => {
                         self.show_help = false;
+                        self.help_scroll = 0;
+                    }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        self.help_scroll = self.help_scroll.saturating_add(1);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        self.help_scroll = self.help_scroll.saturating_sub(1);
                     }
                     _ => {}
                 }
@@ -32,6 +43,8 @@ impl App {
                     }
                     KeyCode::Char('j') | KeyCode::Down => self.logs.scroll_down(),
                     KeyCode::Char('k') | KeyCode::Up => self.logs.scroll_up(),
+                    KeyCode::Char('h') | KeyCode::Left => self.logs.scroll_left(),
+                    KeyCode::Char('l') | KeyCode::Right => self.logs.scroll_right(),
                     _ => {}
                 }
                 return;
@@ -45,54 +58,39 @@ impl App {
         }
     }
 
-    fn handle_normal_key(&mut self, key: KeyEvent) {
+    fn adjust_volume(&mut self, delta: i16) {
+        let vol = (self.player.volume as i16 + delta).clamp(0, MAX_VOLUME as i16) as u8;
+        self.player.volume = vol;
+        self.player.engine.set_volume(vol as f32 / MAX_VOLUME as f32);
+    }
+
+    fn seek_relative(&mut self, delta_secs: i32) {
+        if self.player.bar.has_song() {
+            let new_pos = (self.player.bar.current_secs as i64 + delta_secs as i64)
+                .clamp(0, self.player.bar.total_secs as i64) as u32;
+            self.player.engine.seek(Duration::from_secs(new_pos as u64));
+        }
+    }
+
+    /// 处理 expanded 和 normal 共享的全局键绑定，返回 true 表示已处理
+    fn handle_global_key(&mut self, key: KeyEvent) -> bool {
         match (key.modifiers, key.code) {
-            // 全局
             (_, KeyCode::Char('q')) | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
                 self.running = false;
             }
-            (_, KeyCode::Char('?')) => {
-                self.show_help = true;
-            }
+            (_, KeyCode::Char('?')) => self.show_help = true,
             (_, KeyCode::Char('!')) => {
                 self.show_logs = true;
                 self.logs.mark_read();
             }
-            (_, KeyCode::Char('L')) => {
-                self.logout();
-            }
-            (_, KeyCode::Char(' ')) => {
-                self.toggle_play_pause();
-            }
-            (_, KeyCode::Char('n')) => {
-                self.play_next();
-            }
-            (_, KeyCode::Char('N')) => {
-                self.play_prev();
-            }
-            (_, KeyCode::Char('+') | KeyCode::Char('=')) => {
-                let vol = (self.player.volume as u16 + 5).min(100) as u8;
-                self.player.volume = vol;
-                self.player.engine.set_volume(vol as f32 / 100.0);
-            }
-            (_, KeyCode::Char('-')) => {
-                let vol = self.player.volume.saturating_sub(5);
-                self.player.volume = vol;
-                self.player.engine.set_volume(vol as f32 / 100.0);
-            }
-            (_, KeyCode::Char('>')) => {
-                if self.player.bar.has_song() {
-                    let new_pos = (self.player.bar.current_secs + 5)
-                        .min(self.player.bar.total_secs);
-                    self.player.engine.seek(Duration::from_secs(new_pos as u64));
-                }
-            }
-            (_, KeyCode::Char('<')) => {
-                if self.player.bar.has_song() {
-                    let new_pos = self.player.bar.current_secs.saturating_sub(5);
-                    self.player.engine.seek(Duration::from_secs(new_pos as u64));
-                }
-            }
+            (_, KeyCode::Char('L')) => self.logout(),
+            (_, KeyCode::Char(' ')) => self.toggle_play_pause(),
+            (_, KeyCode::Char('n')) => self.play_next(),
+            (_, KeyCode::Char('N')) => self.play_prev(),
+            (_, KeyCode::Char('+') | KeyCode::Char('=')) => self.adjust_volume(VOLUME_STEP as i16),
+            (_, KeyCode::Char('-')) => self.adjust_volume(-(VOLUME_STEP as i16)),
+            (_, KeyCode::Char('>')) => self.seek_relative(SEEK_STEP_SECS as i32),
+            (_, KeyCode::Char('<')) => self.seek_relative(-(SEEK_STEP_SECS as i32)),
             (_, KeyCode::Char('s')) => {
                 self.settings.player.default_play_mode = match self.settings.player.default_play_mode {
                     PlayMode::Sequential => PlayMode::Shuffle,
@@ -100,26 +98,57 @@ impl App {
                     PlayMode::RepeatOne => PlayMode::Sequential,
                 };
             }
-            (_, KeyCode::Char('v')) => {
-                self.player.expanded = !self.player.expanded;
-            }
-            // TODO: 搜索功能尚未完成，暂时禁用
-            // (_, KeyCode::Char('/')) => {
-            //     self.input_mode = InputMode::Search;
-            //     self.search.is_editing = true;
-            // }
+            _ => return false,
+        }
+        true
+    }
 
-            // Miller Columns 导航
+    fn handle_normal_key(&mut self, key: KeyEvent) {
+        if self.handle_global_key(key) {
+            return;
+        }
+
+        if self.player.expanded {
+            // 展开页专属键
+            match (key.modifiers, key.code) {
+                (_, KeyCode::Char('i')) => self.player.expanded = false,
+                (_, KeyCode::Char('j') | KeyCode::Down) => self.nav_down(),
+                (_, KeyCode::Char('k') | KeyCode::Up) => self.nav_up(),
+                (_, KeyCode::Char('g')) => self.nav_top(),
+                (_, KeyCode::Char('G')) => self.nav_bottom(),
+                (_, KeyCode::Char('h') | KeyCode::Left) => self.player.expanded = false,
+                (_, KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter) => {
+                    self.play_expanded_song();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Normal 模式专属键
+        match (key.modifiers, key.code) {
+            (_, KeyCode::Char('i')) => {
+                self.player.expanded = true;
+                self.player.follow_playback = self.player.current_detail.is_some();
+            }
+            (_, KeyCode::Char('/')) => {
+                self.search.clear();
+                self.input_mode = InputMode::Search;
+            }
+            (_, KeyCode::Tab) => {
+                if self.nav.contains(&NavNode::SearchResults) {
+                    self.search.search_type = self.search.search_type.next();
+                    self.nav.current_mut().selected = 0;
+                }
+            }
             (_, KeyCode::Char('j') | KeyCode::Down) => self.nav_down(),
             (_, KeyCode::Char('k') | KeyCode::Up) => self.nav_up(),
             (_, KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter) => self.nav_drill_in(),
             (_, KeyCode::Char('h') | KeyCode::Left) => self.nav_drill_out(),
             (_, KeyCode::Char('g')) => self.nav_top(),
             (_, KeyCode::Char('G')) => self.nav_bottom(),
-
-            (_, KeyCode::Char('a')) => {
-                self.add_selected_to_queue();
-            }
+            (_, KeyCode::Char('a')) => self.add_selected_to_queue(),
+            (_, KeyCode::Char('d')) => self.remove_from_queue(),
             (_, KeyCode::Char('o')) => {
                 if let Some(song) = self.selected_song().cloned() {
                     if let Some(link) = song.external_links.first() {
@@ -138,12 +167,15 @@ impl App {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc) => {
                 self.input_mode = InputMode::Normal;
-                self.search.is_editing = false;
             }
             (_, KeyCode::Enter) => {
-                // TODO: 执行搜索
-                self.search.is_editing = false;
                 self.input_mode = InputMode::Normal;
+                if !self.search.query.trim().is_empty() {
+                    self.execute_search();
+                    if !self.nav.pop_to(&NavNode::SearchResults) {
+                        self.nav.push(NavNode::SearchResults);
+                    }
+                }
             }
             (_, KeyCode::Tab) => {
                 self.search.search_type = self.search.search_type.next();
@@ -151,14 +183,28 @@ impl App {
             (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
                 self.search.sort = self.search.sort.next();
             }
+            (_, KeyCode::Left) => {
+                if self.search.cursor_pos > 0 {
+                    self.search.cursor_pos -= 1;
+                }
+            }
+            (_, KeyCode::Right) => {
+                if self.search.cursor_pos < self.search.query.chars().count() {
+                    self.search.cursor_pos += 1;
+                }
+            }
             (_, KeyCode::Backspace) => {
                 if self.search.cursor_pos > 0 {
                     self.search.cursor_pos -= 1;
-                    self.search.query.remove(self.search.cursor_pos);
+                    let byte_idx = self.search.query.char_indices()
+                        .nth(self.search.cursor_pos).map(|(i, _)| i).unwrap_or(self.search.query.len());
+                    self.search.query.remove(byte_idx);
                 }
             }
             (_, KeyCode::Char(c)) => {
-                self.search.query.insert(self.search.cursor_pos, c);
+                let byte_idx = self.search.query.char_indices()
+                    .nth(self.search.cursor_pos).map(|(i, _)| i).unwrap_or(self.search.query.len());
+                self.search.query.insert(byte_idx, c);
                 self.search.cursor_pos += 1;
             }
             _ => {}
@@ -241,6 +287,7 @@ impl App {
                         self.player.bar.artist.clear();
                         self.player.bar.current_secs = 0;
                         self.player.bar.total_secs = 0;
+                        self.player.parsed_lyrics = crate::ui::lyrics::ParsedLyrics::Empty;
                     }
                     PlayerEvent::Progress { position_secs, duration_secs } => {
                         self.player.bar.current_secs = position_secs;
@@ -266,9 +313,19 @@ impl App {
                 self.player.bar.is_loading = false;
                 self.player.bar.cover_url = detail.cover_url.clone();
                 let duration_secs = detail.duration_seconds as u32;
+                let gain = if self.settings.player.replay_gain {
+                    detail.gain
+                } else {
+                    None
+                };
                 let cover_url = detail.cover_url.clone();
+                self.player.parsed_lyrics = crate::ui::lyrics::parse(&detail.lyrics);
                 self.player.current_detail = Some(detail);
-                self.player.engine.play(AudioSource::Buffered(data), duration_secs);
+                self.player.engine.play(AudioSource::Buffered(data), duration_secs, gain);
+                if let Some(pos_ms) = self.resume_position_ms.take() {
+                    self.player.engine.seek(std::time::Duration::from_millis(pos_ms));
+                    self.player.bar.current_secs = (pos_ms / 1000) as u32;
+                }
                 self.start_image_fetch(&cover_url);
             }
             AppMessage::AudioFetchError(err) => {
@@ -281,10 +338,27 @@ impl App {
                     if !songs.is_empty() {
                         self.cache.songs.insert(node, songs);
                     }
+                    self.after_nav_move();
                 }
                 DataPayload::Tags(tags) => {
                     self.cache.loading.remove(&NavNode::Categories);
-                    self.cache.tags = tags;
+                    self.cache.tags = Some(tags);
+                    self.after_nav_move();
+                }
+                DataPayload::Playlists(playlists) => {
+                    self.cache.loading.remove(&NavNode::MyPlaylists);
+                    self.cache.playlists = Some(playlists);
+                    self.after_nav_move();
+                }
+                DataPayload::SearchUsers(users) => {
+                    self.cache.loading.remove(&NavNode::SearchResults);
+                    self.cache.search_users = users;
+                    self.after_nav_move();
+                }
+                DataPayload::SearchPlaylists(playlists) => {
+                    self.cache.loading.remove(&NavNode::SearchResults);
+                    self.cache.search_playlists = playlists;
+                    self.after_nav_move();
                 }
             },
             AppMessage::Error(err) => {
@@ -318,6 +392,7 @@ impl App {
                         self.login.step = LoginStep::Input;
                         self.login.captcha_key = None;
                         self.input_mode = InputMode::Normal;
+                        self.resume_playback();
                     }
                     Err(e) => {
                         self.login.error = Some(e);
@@ -326,16 +401,21 @@ impl App {
                     }
                 }
             }
-            AppMessage::ImageFetched { url, protocol } => {
+            AppMessage::ImageFetched { url, protocol, raw_bytes } => {
                 self.cache.images_loading.remove(&url);
-                self.cache.images.insert(url, protocol);
+                self.cache.image_bytes.insert(url.clone(), raw_bytes);
+                self.cache.images.insert(url.clone(), protocol);
+                self.cache.image_order.push(url);
+                self.cache.evict_images_if_needed();
             }
             AppMessage::DebouncedCoverLoad(url) => {
                 self.start_image_fetch(&url);
             }
             AppMessage::SongDetailFetched { node, index, detail } => {
                 self.cache.detail_loading.remove(&detail.id);
-                if let Some(songs) = self.cache.songs.get_mut(&node) {
+                if node == NavNode::Queue {
+                    self.cache.queue_song_detail.insert(detail.id, detail);
+                } else if let Some(songs) = self.cache.songs.get_mut(&node) {
                     if index < songs.len() && songs[index].id == detail.id {
                         songs[index] = detail;
                     }

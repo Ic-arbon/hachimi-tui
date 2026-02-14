@@ -11,21 +11,35 @@ use ratatui::{
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
-use super::navigation::{NavNode, NavStack};
+use super::navigation::{NavNode, NavStack, SearchType};
 use super::theme::Theme;
 use crate::config::settings::Settings;
+use crate::model::playlist::{PlaylistItem, PlaylistMetadata};
+use crate::model::queue::QueueState;
 use crate::model::song::PublicSongDetail;
+use crate::model::user::PublicUserProfile;
+
+/// render_column 和 render_preview_column 共享的只读数据
+pub struct ColumnData<'a> {
+    pub song_cache: &'a HashMap<NavNode, Vec<PublicSongDetail>>,
+    pub tag_cache: &'a [String],
+    pub playlist_cache: &'a [PlaylistItem],
+    pub queue: &'a QueueState,
+    pub queue_detail: &'a HashMap<i64, PublicSongDetail>,
+    pub loading: &'a HashSet<NavNode>,
+    pub settings: &'a Settings,
+    pub search_type: SearchType,
+    pub search_users: &'a [PublicUserProfile],
+    pub search_playlists: &'a [PlaylistMetadata],
+}
 
 /// 渲染 Miller Columns 三栏布局
 pub fn render(
     frame: &mut Frame,
     area: Rect,
     nav: &NavStack,
-    song_cache: &HashMap<NavNode, Vec<PublicSongDetail>>,
-    tag_cache: &[String],
-    loading: &HashSet<NavNode>,
+    data: &ColumnData,
     scroll_tick: u16,
-    settings: &Settings,
     image_cache: &mut HashMap<String, StatefulProtocol>,
     font_size: (u16, u16),
     last_image_rect: &mut Rect,
@@ -39,30 +53,8 @@ pub fn render(
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
-        render_column(
-            frame,
-            cols[0],
-            &current.node,
-            current.selected,
-            true,
-            song_cache,
-            tag_cache,
-            loading,
-            scroll_tick,
-        );
-        render_preview_column(
-            frame,
-            cols[1],
-            &current.node,
-            current.selected,
-            song_cache,
-            tag_cache,
-            loading,
-            settings,
-            image_cache,
-            font_size,
-            last_image_rect,
-        );
+        render_column(frame, cols[0], &current.node, current.selected, true, data, scroll_tick);
+        render_preview_column(frame, cols[1], &current.node, current.selected, data, image_cache, font_size, last_image_rect);
     } else {
         let cols = Layout::default()
             .direction(Direction::Horizontal)
@@ -74,43 +66,11 @@ pub fn render(
             .split(area);
 
         if let Some(parent) = nav.parent() {
-            render_column(
-                frame,
-                cols[0],
-                &parent.node,
-                parent.selected,
-                false,
-                song_cache,
-                tag_cache,
-                loading,
-                0, // 父列不滚动
-            );
+            render_column(frame, cols[0], &parent.node, parent.selected, false, data, 0);
         }
 
-        render_column(
-            frame,
-            cols[1],
-            &current.node,
-            current.selected,
-            true,
-            song_cache,
-            tag_cache,
-            loading,
-            scroll_tick,
-        );
-        render_preview_column(
-            frame,
-            cols[2],
-            &current.node,
-            current.selected,
-            song_cache,
-            tag_cache,
-            loading,
-            settings,
-            image_cache,
-            font_size,
-            last_image_rect,
-        );
+        render_column(frame, cols[1], &current.node, current.selected, true, data, scroll_tick);
+        render_preview_column(frame, cols[2], &current.node, current.selected, data, image_cache, font_size, last_image_rect);
     }
 }
 
@@ -121,9 +81,7 @@ fn render_column(
     parent_node: &NavNode,
     selected: usize,
     is_active: bool,
-    song_cache: &HashMap<NavNode, Vec<PublicSongDetail>>,
-    tag_cache: &[String],
-    loading: &HashSet<NavNode>,
+    data: &ColumnData,
     scroll_tick: u16,
 ) {
     if parent_node.has_static_children() {
@@ -136,16 +94,8 @@ fn render_column(
             .iter()
             .enumerate()
             .map(|(i, child)| {
-                let style = if i == selected && is_active {
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
-                } else if i == selected {
-                    Theme::secondary().add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                ListItem::new(format!(" {}", child.display_name())).style(style)
+                ListItem::new(format!(" {}", child.display_name()))
+                    .style(Theme::list_item_style(i == selected, is_active))
             })
             .collect();
 
@@ -163,28 +113,19 @@ fn render_column(
         frame.render_stateful_widget(list, area, &mut state);
     } else if *parent_node == NavNode::Categories {
         // 渲染标签列表
-        if tag_cache.is_empty() {
-            if loading.contains(parent_node) {
-                let hint = Paragraph::new(Span::styled(format!("  {}", t!("miller.loading")), Theme::active()));
-                frame.render_widget(hint, area);
+        if data.tag_cache.is_empty() {
+            if data.loading.contains(parent_node) {
+                super::util::render_placeholder(frame, area, true, "");
             }
             return;
         }
 
-        let items: Vec<ListItem> = tag_cache
+        let items: Vec<ListItem> = data.tag_cache
             .iter()
             .enumerate()
             .map(|(i, tag)| {
-                let text_style = if i == selected && is_active {
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
-                } else if i == selected {
-                    Theme::secondary().add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                ListItem::new(format!(" {}", tag)).style(text_style)
+                ListItem::new(format!(" {}", tag))
+                    .style(Theme::list_item_style(i == selected, is_active))
             })
             .collect();
 
@@ -200,10 +141,123 @@ fn render_column(
         }
 
         frame.render_stateful_widget(list, area, &mut state);
-    } else if let Some(songs) = song_cache.get(parent_node) {
-        if songs.is_empty() {
-            let hint = Paragraph::new(Span::styled(format!("  {}", t!("miller.no_songs")), Theme::secondary()));
+    } else if *parent_node == NavNode::MyPlaylists {
+        // 渲染歌单列表
+        if data.playlist_cache.is_empty() {
+            super::util::render_placeholder(frame, area, data.loading.contains(parent_node), t!("miller.no_playlists"));
+            return;
+        }
+
+        let items: Vec<ListItem> = data.playlist_cache
+            .iter()
+            .enumerate()
+            .map(|(i, pl)| {
+                ListItem::new(format!(" {}", pl.name))
+                    .style(Theme::list_item_style(i == selected, is_active))
+            })
+            .collect();
+
+        let list = List::new(items).highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let mut state = ListState::default();
+        if is_active {
+            state.select(Some(selected));
+        }
+
+        frame.render_stateful_widget(list, area, &mut state);
+    } else if *parent_node == NavNode::Queue {
+        // 渲染播放队列
+        if data.queue.songs.is_empty() {
+            let hint = Paragraph::new(Span::styled(format!("  {}", t!("queue.empty")), Theme::secondary()));
             frame.render_widget(hint, area);
+            return;
+        }
+
+        let now_playing = data.queue.current_index;
+        let items: Vec<ListItem> = data.queue
+            .songs
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let is_sel = i == selected && is_active;
+                let tick = if is_sel { scroll_tick } else { 0 };
+                let prefix = if Some(i) == now_playing { "\u{25b6} " } else { "  " };
+                let title = format!("{}{}", prefix, item.name);
+                let line = song_list_line(&title, &item.artist, area.width, is_sel, tick);
+                ListItem::new(line)
+            })
+            .collect();
+
+        let list = List::new(items).highlight_style(
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let mut state = ListState::default();
+        if is_active {
+            state.select(Some(selected));
+        }
+
+        frame.render_stateful_widget(list, area, &mut state);
+    } else if *parent_node == NavNode::SearchResults {
+        // 搜索结果按 search_type 渲染不同列表
+        match data.search_type {
+            SearchType::Song => {
+                if let Some(songs) = data.song_cache.get(&NavNode::SearchResults) {
+                    if songs.is_empty() {
+                        super::util::render_placeholder(frame, area, false, t!("search.no_results"));
+                        return;
+                    }
+                    let items: Vec<ListItem> = songs.iter().enumerate().map(|(i, song)| {
+                        let is_sel = i == selected && is_active;
+                        let tick = if is_sel { scroll_tick } else { 0 };
+                        ListItem::new(song_list_line(&song.title, &song.uploader_name, area.width, is_sel, tick))
+                    }).collect();
+                    let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+                    let mut state = ListState::default();
+                    if is_active { state.select(Some(selected)); }
+                    frame.render_stateful_widget(list, area, &mut state);
+                } else if data.loading.contains(&NavNode::SearchResults) {
+                    super::util::render_placeholder(frame, area, true, "");
+                }
+            }
+            SearchType::User => {
+                if data.search_users.is_empty() {
+                    super::util::render_placeholder(frame, area, data.loading.contains(&NavNode::SearchResults), t!("search.no_results"));
+                    return;
+                }
+                let items: Vec<ListItem> = data.search_users.iter().enumerate().map(|(i, user)| {
+                    ListItem::new(format!(" {}", user.username))
+                        .style(Theme::list_item_style(i == selected, is_active))
+                }).collect();
+                let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+                let mut state = ListState::default();
+                if is_active { state.select(Some(selected)); }
+                frame.render_stateful_widget(list, area, &mut state);
+            }
+            SearchType::Playlist => {
+                if data.search_playlists.is_empty() {
+                    super::util::render_placeholder(frame, area, data.loading.contains(&NavNode::SearchResults), t!("search.no_results"));
+                    return;
+                }
+                let items: Vec<ListItem> = data.search_playlists.iter().enumerate().map(|(i, pl)| {
+                    ListItem::new(format!(" {}", pl.name))
+                        .style(Theme::list_item_style(i == selected, is_active))
+                }).collect();
+                let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+                let mut state = ListState::default();
+                if is_active { state.select(Some(selected)); }
+                frame.render_stateful_widget(list, area, &mut state);
+            }
+        }
+    } else if let Some(songs) = data.song_cache.get(parent_node) {
+        if songs.is_empty() {
+            super::util::render_placeholder(frame, area, false, t!("miller.no_songs"));
             return;
         }
 
@@ -235,9 +289,8 @@ fn render_column(
         }
 
         frame.render_stateful_widget(list, area, &mut state);
-    } else if loading.contains(parent_node) {
-        let hint = Paragraph::new(Span::styled(format!("  {}", t!("miller.loading")), Theme::active()));
-        frame.render_widget(hint, area);
+    } else if data.loading.contains(parent_node) {
+        super::util::render_placeholder(frame, area, true, "");
     }
 }
 
@@ -247,10 +300,7 @@ fn render_preview_column(
     area: Rect,
     parent_node: &NavNode,
     selected: usize,
-    song_cache: &HashMap<NavNode, Vec<PublicSongDetail>>,
-    tag_cache: &[String],
-    loading: &HashSet<NavNode>,
-    settings: &Settings,
+    data: &ColumnData,
     image_cache: &mut HashMap<String, StatefulProtocol>,
     font_size: (u16, u16),
     last_image_rect: &mut Rect,
@@ -277,17 +327,14 @@ fn render_preview_column(
             let list = List::new(items);
             frame.render_widget(list, area);
         } else if *selected_node == NavNode::Settings {
-            // 预览设置项列表
-            super::settings_view::render_preview(frame, area, settings);
+            super::settings_view::render_preview(frame, area, data.settings);
         } else if *selected_node == NavNode::Categories {
-            // 预览标签列表
-            if tag_cache.is_empty() {
-                if loading.contains(selected_node) {
-                    let hint = Paragraph::new(Span::styled(format!("  {}", t!("miller.loading")), Theme::active()));
-                    frame.render_widget(hint, area);
+            if data.tag_cache.is_empty() {
+                if data.loading.contains(selected_node) {
+                    super::util::render_placeholder(frame, area, true, "");
                 }
             } else {
-                let items: Vec<ListItem> = tag_cache
+                let items: Vec<ListItem> = data.tag_cache
                     .iter()
                     .map(|tag| {
                         ListItem::new(format!(" {}", tag)).style(Theme::secondary())
@@ -296,11 +343,38 @@ fn render_preview_column(
                 let list = List::new(items);
                 frame.render_widget(list, area);
             }
-        } else if let Some(songs) = song_cache.get(selected_node) {
+        } else if *selected_node == NavNode::MyPlaylists {
+            if data.playlist_cache.is_empty() {
+                if data.loading.contains(selected_node) {
+                    super::util::render_placeholder(frame, area, true, "");
+                }
+            } else {
+                let items: Vec<ListItem> = data.playlist_cache
+                    .iter()
+                    .map(|pl| {
+                        ListItem::new(format!(" {}", pl.name)).style(Theme::secondary())
+                    })
+                    .collect();
+                let list = List::new(items);
+                frame.render_widget(list, area);
+            }
+        } else if *selected_node == NavNode::Queue {
+            if data.queue.songs.is_empty() {
+                let hint = Paragraph::new(Span::styled(format!("  {}", t!("queue.empty")), Theme::secondary()));
+                frame.render_widget(hint, area);
+            } else {
+                let now_playing = data.queue.current_index;
+                let items: Vec<ListItem> = data.queue.songs.iter().enumerate().map(|(i, item)| {
+                    let prefix = if Some(i) == now_playing { "\u{25b6} " } else { "  " };
+                    ListItem::new(format!("{}{}", prefix, item.name)).style(Theme::secondary())
+                }).collect();
+                let list = List::new(items);
+                frame.render_widget(list, area);
+            }
+        } else if let Some(songs) = data.song_cache.get(selected_node) {
             render_song_list_preview(frame, area, songs);
-        } else if loading.contains(selected_node) {
-            let hint = Paragraph::new(Span::styled(format!("  {}", t!("miller.loading")), Theme::active()));
-            frame.render_widget(hint, area);
+        } else if data.loading.contains(selected_node) {
+            super::util::render_placeholder(frame, area, true, "");
         } else {
             let hint = Paragraph::new(vec![Line::from(Span::styled(
                 format!("  {}", selected_node.display_name()),
@@ -309,22 +383,150 @@ fn render_preview_column(
             frame.render_widget(hint, area);
         }
     } else if *parent_node == NavNode::Categories {
-        // 当前在 Categories 级别，预览选中标签的歌曲
-        if let Some(tag_name) = tag_cache.get(selected) {
+        if let Some(tag_name) = data.tag_cache.get(selected) {
             let tag_node = NavNode::Tag { name: tag_name.clone() };
-            if let Some(songs) = song_cache.get(&tag_node) {
+            if let Some(songs) = data.song_cache.get(&tag_node) {
                 render_song_list_preview(frame, area, songs);
-            } else if loading.contains(&tag_node) {
-                let hint = Paragraph::new(Span::styled(format!("  {}", t!("miller.loading")), Theme::active()));
-                frame.render_widget(hint, area);
+            } else if data.loading.contains(&tag_node) {
+                super::util::render_placeholder(frame, area, true, "");
             }
         }
-    } else if let Some(songs) = song_cache.get(parent_node) {
-        // 当前节点是歌曲列表，Preview 显示选中歌曲详情
+    } else if *parent_node == NavNode::MyPlaylists {
+        if let Some(pl) = data.playlist_cache.get(selected) {
+            let pl_node = NavNode::PlaylistDetail { id: pl.id };
+            if let Some(songs) = data.song_cache.get(&pl_node) {
+                render_song_list_preview(frame, area, songs);
+            } else if data.loading.contains(&pl_node) {
+                super::util::render_placeholder(frame, area, true, "");
+            }
+        }
+    } else if *parent_node == NavNode::Queue {
+        if let Some(item) = data.queue.songs.get(selected) {
+            if let Some(detail) = data.queue_detail.get(&item.id) {
+                render_song_detail(frame, area, detail, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+            } else {
+                render_queue_item_detail(frame, area, item, data.queue.current_index == Some(selected), image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+            }
+        }
+    } else if *parent_node == NavNode::SearchResults {
+        match data.search_type {
+            SearchType::Song => {
+                if let Some(song) = data.song_cache.get(&NavNode::SearchResults).and_then(|s| s.get(selected)) {
+                    render_song_detail(frame, area, song, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+                }
+            }
+            SearchType::User => {
+                if let Some(user) = data.search_users.get(selected) {
+                    render_user_preview(frame, area, user, image_cache, font_size, last_image_rect);
+                }
+            }
+            SearchType::Playlist => {
+                if let Some(pl) = data.search_playlists.get(selected) {
+                    render_playlist_preview(frame, area, pl, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+                }
+            }
+        }
+    } else if let Some(songs) = data.song_cache.get(parent_node) {
         if let Some(song) = songs.get(selected) {
-            render_song_detail(frame, area, song, image_cache, font_size, last_image_rect);
+            render_song_detail(frame, area, song, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
         }
     }
+}
+
+/// 按百分比缩放正方形封面。
+///
+/// 在像素空间算出最大正方形边长，按 pct 缩放后转回 cell 数。
+/// cell rect 可能不是精确像素正方形（差值 < 1 cell），配合 Resize::Crop
+/// 渲染时裁掉亚 cell 级多余像素，视觉上既平滑又无黑边。
+fn scaled_square(max_w: u16, max_h: u16, fw: u16, fh: u16, pct: u8) -> (u16, u16) {
+    let side_px = (max_w as u32 * fw as u32).min(max_h as u32 * fh as u32);
+    let scaled_px = (side_px * pct as u32 / 100).max(1);
+    let w = (scaled_px / fw as u32).min(max_w as u32).max(1) as u16;
+    let h = (scaled_px / fh as u32).min(max_h as u32).max(1) as u16;
+    (w, h)
+}
+
+/// 渲染队列项目详情预览
+fn render_queue_item_detail(
+    frame: &mut Frame,
+    area: Rect,
+    item: &crate::model::queue::MusicQueueItem,
+    is_playing: bool,
+    image_cache: &mut HashMap<String, StatefulProtocol>,
+    font_size: (u16, u16),
+    last_image_rect: &mut Rect,
+    cover_scale: u8,
+) {
+    let inner = super::util::padded_rect(area, 2);
+
+    let wants_cover = !item.cover_url.is_empty();
+    let has_cover = wants_cover && image_cache.contains_key(&item.cover_url);
+
+    let (img_area, text_area) = if wants_cover {
+        let (img_width, img_height) =
+            scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(img_height), Constraint::Min(1)])
+            .split(inner);
+        let x_offset = inner.width.saturating_sub(img_width) / 2;
+        let img_rect = Rect {
+            x: inner.x + x_offset,
+            y: chunks[0].y,
+            width: img_width,
+            height: img_height,
+        };
+        *last_image_rect = img_rect;
+        if has_cover {
+            (Some(img_rect), chunks[1])
+        } else {
+            (None, inner)
+        }
+    } else {
+        (None, inner)
+    };
+
+    if let Some(img_rect) = img_area {
+        if let Some(protocol) = image_cache.get_mut(&item.cover_url) {
+            let image = StatefulImage::new(None);
+            frame.render_stateful_widget(image, img_rect, protocol);
+        }
+    }
+
+    let mut lines = Vec::new();
+
+    if is_playing {
+        lines.push(Line::from(Span::styled(
+            "\u{25b6} Now Playing",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        )));
+    }
+
+    lines.push(Line::from(Span::styled(
+        item.name.clone(),
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("by {}", item.artist),
+        Theme::secondary(),
+    )));
+    lines.push(Line::from(""));
+
+    let mins = item.duration_secs / 60;
+    let secs = item.duration_secs % 60;
+    lines.push(Line::from(Span::styled(
+        format!("{}:{:02}", mins, secs),
+        Theme::active(),
+    )));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        t!("queue.hint").to_string(),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(para, text_area);
 }
 
 /// 渲染歌曲列表预览（Preview 栏中显示标题列表）
@@ -350,27 +552,21 @@ fn render_song_detail(
     image_cache: &mut HashMap<String, StatefulProtocol>,
     font_size: (u16, u16),
     last_image_rect: &mut Rect,
+    cover_scale: u8,
 ) {
-    // 左右各留 2 列边距
-    let pad = 2u16.min(area.width / 2);
-    let inner = Rect {
-        x: area.x + pad,
-        width: area.width.saturating_sub(pad * 2),
-        ..area
-    };
+    let inner = super::util::padded_rect(area, 2);
 
-    // 检查是否有缓存的封面图
-    let has_cover = !song.cover_url.is_empty() && image_cache.contains_key(&song.cover_url);
+    let wants_cover = !song.cover_url.is_empty();
+    let has_cover = wants_cover && image_cache.contains_key(&song.cover_url);
 
-    let (img_area, text_area) = if has_cover {
-        let max_h = (inner.height / 2).min(15).max(3);
+    // 只要有 cover_url 就计算 hint rect，供下一次图片加载使用
+    let (img_area, text_area) = if wants_cover {
         let (img_width, img_height) =
-            super::util::square_cells(inner.width, max_h, font_size.0, font_size.1);
+            scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(img_height), Constraint::Min(1)])
             .split(inner);
-        // 图片区域水平居中
         let x_offset = inner.width.saturating_sub(img_width) / 2;
         let img_rect = Rect {
             x: inner.x + x_offset,
@@ -379,7 +575,11 @@ fn render_song_detail(
             height: img_height,
         };
         *last_image_rect = img_rect;
-        (Some(img_rect), chunks[1])
+        if has_cover {
+            (Some(img_rect), chunks[1])
+        } else {
+            (None, inner)
+        }
     } else {
         (None, inner)
     };
@@ -635,4 +835,89 @@ pub fn song_list_line(
         Span::raw(pad),
         Span::styled(artist_display, artist_style),
     ])
+}
+
+/// 渲染用户搜索结果预览
+fn render_user_preview(
+    frame: &mut Frame,
+    area: Rect,
+    user: &PublicUserProfile,
+    image_cache: &mut HashMap<String, StatefulProtocol>,
+    font_size: (u16, u16),
+    last_image_rect: &mut Rect,
+) {
+    let inner = super::util::padded_rect(area, 2);
+    let avatar_url = user.avatar_url.as_deref().unwrap_or("");
+    let wants_avatar = !avatar_url.is_empty();
+    let has_avatar = wants_avatar && image_cache.contains_key(avatar_url);
+    let (img_area, text_area) = if wants_avatar {
+        let max_h = inner.height / 4;
+        let half_w = inner.width / 2;
+        let (iw, ih) = super::util::square_cells(half_w, max_h, font_size.0, font_size.1);
+        let chunks = Layout::default().direction(Direction::Vertical)
+            .constraints([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
+        let xo = inner.width.saturating_sub(iw) / 2;
+        let r = Rect { x: inner.x + xo, y: chunks[0].y, width: iw, height: ih };
+        *last_image_rect = r;
+        if has_avatar { (Some(r), chunks[1]) } else { (None, inner) }
+    } else { (None, inner) };
+    if let Some(r) = img_area {
+        if let Some(p) = image_cache.get_mut(avatar_url) {
+            frame.render_stateful_widget(StatefulImage::new(None), r, p);
+        }
+    }
+    let mut lines = vec![Line::from(Span::styled(user.username.clone(), Style::default().add_modifier(Modifier::BOLD)))];
+    if let Some(bio) = &user.bio {
+        if !bio.is_empty() {
+            lines.push(Line::from(""));
+            for l in bio.lines() { lines.push(Line::from(Span::styled(l.to_string(), Theme::secondary()))); }
+        }
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), text_area);
+}
+
+/// 渲染歌单搜索结果预览
+fn render_playlist_preview(
+    frame: &mut Frame,
+    area: Rect,
+    pl: &PlaylistMetadata,
+    image_cache: &mut HashMap<String, StatefulProtocol>,
+    font_size: (u16, u16),
+    last_image_rect: &mut Rect,
+    cover_scale: u8,
+) {
+    let inner = super::util::padded_rect(area, 2);
+    let cover_url = pl.cover_url.as_deref().unwrap_or("");
+    let wants_cover = !cover_url.is_empty();
+    let has_cover = wants_cover && image_cache.contains_key(cover_url);
+    let (img_area, text_area) = if wants_cover {
+        let (iw, ih) = scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
+        let chunks = Layout::default().direction(Direction::Vertical)
+            .constraints([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
+        let xo = inner.width.saturating_sub(iw) / 2;
+        let r = Rect { x: inner.x + xo, y: chunks[0].y, width: iw, height: ih };
+        *last_image_rect = r;
+        if has_cover { (Some(r), chunks[1]) } else { (None, inner) }
+    } else { (None, inner) };
+    if let Some(r) = img_area {
+        if let Some(p) = image_cache.get_mut(cover_url) {
+            frame.render_stateful_widget(StatefulImage::new(None), r, p);
+        }
+    }
+    let mut lines = vec![
+        Line::from(Span::styled(pl.name.clone(), Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(format!("by {}", pl.user_name), Theme::secondary())),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(format!("{} ", t!("search.songs_count")), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{}", pl.songs_count), Theme::active()),
+        ]),
+    ];
+    if let Some(desc) = &pl.description {
+        if !desc.is_empty() {
+            lines.push(Line::from(""));
+            for l in desc.lines() { lines.push(Line::from(Span::styled(l.to_string(), Theme::secondary()))); }
+        }
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), text_area);
 }

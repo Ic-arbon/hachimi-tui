@@ -45,6 +45,8 @@ pub struct DisplaySettings {
     pub kids_mode: bool,
     #[serde(default)]
     pub language: Lang,
+    #[serde(default = "default_cover_scale")]
+    pub cover_scale: u8,
 }
 
 fn default_volume() -> u8 {
@@ -55,6 +57,9 @@ fn default_true() -> bool {
 }
 fn default_cache_size() -> u64 {
     2048
+}
+fn default_cover_scale() -> u8 {
+    70
 }
 
 impl Default for Settings {
@@ -90,6 +95,7 @@ impl Default for DisplaySettings {
         Self {
             kids_mode: false,
             language: Lang::default(),
+            cover_scale: default_cover_scale(),
         }
     }
 }

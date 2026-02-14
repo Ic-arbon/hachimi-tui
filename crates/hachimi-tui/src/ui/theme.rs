@@ -17,6 +17,16 @@ const TAG_COLORS: &[Color] = &[
 ];
 
 impl Theme {
+    pub fn list_item_style(selected: bool, active: bool) -> Style {
+        if selected && active {
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        } else if selected {
+            Self::secondary().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        }
+    }
+
     pub fn highlight() -> Style {
         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
     }
@@ -33,10 +43,12 @@ impl Theme {
         Style::default().fg(Color::Red)
     }
 
+    #[allow(dead_code)] // TODO: 成功状态样式
     pub fn success() -> Style {
         Style::default().fg(Color::Green)
     }
 
+    #[allow(dead_code)] // TODO: 默认样式
     pub fn normal() -> Style {
         Style::default()
     }
@@ -45,14 +57,17 @@ impl Theme {
         Style::default().add_modifier(Modifier::BOLD)
     }
 
+    #[allow(dead_code)] // TODO: 选中行样式
     pub fn selected_row() -> Style {
         Style::default().bg(Color::DarkGray)
     }
 
+    #[allow(dead_code)] // TODO: 进度条样式
     pub fn progress_filled() -> Style {
         Style::default().fg(Color::Cyan)
     }
 
+    #[allow(dead_code)] // TODO: 进度条背景样式
     pub fn progress_empty() -> Style {
         Style::default().fg(Color::DarkGray)
     }

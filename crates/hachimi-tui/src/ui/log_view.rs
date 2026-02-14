@@ -5,16 +5,18 @@ use std::io::Write;
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::Paragraph,
 };
 
 use super::theme::Theme;
 
 pub enum LogLevel {
     Error,
+    #[allow(dead_code)] // TODO: 警告日志
     Warn,
+    #[allow(dead_code)] // TODO: 信息日志
     Info,
 }
 
@@ -30,6 +32,7 @@ pub struct LogStore {
     pub entries: VecDeque<LogEntry>,
     pub unread_count: usize,
     pub scroll: usize,
+    pub h_scroll: u16,
     file: Option<File>,
 }
 
@@ -49,6 +52,7 @@ impl LogStore {
             entries: VecDeque::new(),
             unread_count: 0,
             scroll: 0,
+            h_scroll: 0,
             file,
         }
     }
@@ -87,27 +91,23 @@ impl LogStore {
             self.scroll += 1;
         }
     }
+
+    pub fn scroll_left(&mut self) {
+        self.h_scroll = self.h_scroll.saturating_sub(4);
+    }
+
+    pub fn scroll_right(&mut self) {
+        self.h_scroll = self.h_scroll.saturating_add(4);
+    }
 }
 
 pub fn render(frame: &mut Frame, area: Rect, store: &LogStore) {
-    let panel_w = 70u16.min(area.width.saturating_sub(4));
-    let panel_h = 20u16.min(area.height.saturating_sub(4));
-
-    let x = area.x + (area.width.saturating_sub(panel_w)) / 2;
-    let y = area.y + (area.height.saturating_sub(panel_h)) / 2;
-    let panel_area = Rect::new(x, y, panel_w, panel_h);
-
-    // 左右各多清 1 列，避免双宽字符被截断导致边框消失
-    let clear_area = Rect::new(
-        panel_area.x.saturating_sub(1),
-        panel_area.y,
-        (panel_area.width + 2).min(area.width - panel_area.x.saturating_sub(1) + area.x),
-        panel_area.height,
+    let (content_area, hint_area) = super::util::overlay_panel(
+        frame, area, t!("logs.title"),
+        super::constants::LOG_PANEL_WIDTH, super::constants::LOG_PANEL_HEIGHT,
     );
-    frame.render_widget(Clear, clear_area);
 
-    // 可用内容行数 = 面板高度 - 2 (border) - 1 (底部提示)
-    let visible_lines = panel_h.saturating_sub(3) as usize;
+    let visible_lines = content_area.height as usize;
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -134,21 +134,13 @@ pub fn render(frame: &mut Frame, area: Rect, store: &LogStore) {
         }
     }
 
-    // 底部提示
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
+    let para = Paragraph::new(lines).scroll((0, store.h_scroll));
+    frame.render_widget(para, content_area);
+
+    // 固定提示（不受滚动影响）
+    let hint = Paragraph::new(Span::styled(
         format!("    {}", t!("logs.hint")),
         Theme::secondary(),
-    )));
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(Span::styled(
-            format!(" {} ", t!("logs.title")),
-            Style::default().add_modifier(Modifier::BOLD),
-        ));
-
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, panel_area);
+    ));
+    frame.render_widget(hint, hint_area);
 }

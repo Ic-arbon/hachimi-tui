@@ -1,8 +1,10 @@
 #[macro_use]
 pub mod i18n;
 
+pub mod constants;
 pub mod help;
 pub mod log_view;
+pub mod lyrics;
 pub mod login;
 pub mod miller;
 pub mod navigation;

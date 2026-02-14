@@ -10,6 +10,7 @@ pub struct PublicUserProfile {
     pub is_banned: bool,
 }
 
+#[allow(dead_code)] // TODO: 用户搜索
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserSearchResp {
     pub hits: Vec<PublicUserProfile>,

@@ -3,53 +3,51 @@ use std::collections::HashMap;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
 };
 use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
-use super::player_bar::PlayerBarState;
+use super::lyrics::ParsedLyrics;
 use super::theme::Theme;
 use crate::model::song::PublicSongDetail;
 
-/// 渲染展开播放器视图
+/// 正在播放时传入的回放信息，用于时间同步歌词
+pub struct PlaybackInfo<'a> {
+    pub current_secs: u32,
+    pub parsed_lyrics: &'a ParsedLyrics,
+}
+
+/// 渲染展开详情视图（选中歌曲 或 播放中歌曲）
 pub fn render(
     frame: &mut Frame,
     area: Rect,
-    player_bar: &PlayerBarState,
+    detail: &PublicSongDetail,
+    playback: Option<PlaybackInfo<'_>>,
     image_cache: &mut HashMap<String, StatefulProtocol>,
-    current_detail: Option<&PublicSongDetail>,
     font_size: (u16, u16),
     last_image_rect: &mut Rect,
 ) {
-    if !player_bar.has_song() {
-        let hint = Paragraph::new(Span::styled(
-            format!("  {}", t!("player.no_song")),
-            Theme::secondary(),
-        ));
-        frame.render_widget(hint, area);
-        return;
-    }
-
-    let has_cover = !player_bar.cover_url.is_empty()
-        && image_cache.contains_key(&player_bar.cover_url);
+    let has_cover = !detail.cover_url.is_empty()
+        && image_cache.contains_key(&detail.cover_url);
 
     let (cover_area, info_area) = if has_cover {
         let (fw, fh) = font_size;
-        // 像素精确对齐的视觉正方形封面
-        let max_w = (area.width / 2).min(40);
+        let col_width = area.width / 2;
+        let max_w = col_width * 3 / 4;
         let max_h = area.height;
         let (cover_width, cover_height) =
             super::util::square_cells(max_w, max_h, fw, fh);
         let cols = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(cover_width), Constraint::Min(1)])
+            .constraints([Constraint::Length(col_width), Constraint::Min(1)])
             .split(area);
-        // 封面在左栏内垂直居中
+        // 封面在左栏内水平+垂直居中
+        let x_offset = cols[0].width.saturating_sub(cover_width) / 2;
         let y_offset = area.height.saturating_sub(cover_height) / 2;
         let img_rect = Rect {
-            x: cols[0].x,
+            x: cols[0].x + x_offset,
             y: cols[0].y + y_offset,
             width: cover_width,
             height: cover_height,
@@ -62,67 +60,283 @@ pub fn render(
 
     // 渲染封面图
     if let Some(img_rect) = cover_area {
-        if let Some(protocol) = image_cache.get_mut(&player_bar.cover_url) {
+        if let Some(protocol) = image_cache.get_mut(&detail.cover_url) {
             let image = StatefulImage::new(None);
             frame.render_stateful_widget(image, img_rect, protocol);
         }
     }
 
-    // 渲染歌曲信息
-    let pad = 2u16.min(info_area.width / 2);
+    // 右侧内容区
+    let padded = super::util::padded_rect(info_area, 2);
     let inner = Rect {
-        x: info_area.x + pad,
-        y: info_area.y + 1,
-        width: info_area.width.saturating_sub(pad * 2),
-        height: info_area.height.saturating_sub(1),
+        y: padded.y + 1,
+        height: padded.height.saturating_sub(1),
+        ..padded
     };
 
-    let time_current = format_time(player_bar.current_secs);
-    let time_total = format_time(player_bar.total_secs);
-
-    let status_icon = if player_bar.is_loading {
-        "◌"
-    } else if player_bar.is_playing {
-        "▶"
-    } else {
-        "⏸"
-    };
-
-    let mut lines = vec![
+    let header_lines = vec![
         Line::from(Span::styled(
-            player_bar.title.clone(),
+            detail.title.clone(),
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            format!("by {}", player_bar.artist),
+            format!("by {}", detail.uploader_name),
             Theme::secondary(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("{status_icon} {time_current} / {time_total}"),
-            Theme::active(),
         )),
     ];
 
-    // 歌词
-    if let Some(detail) = current_detail {
-        if !detail.lyrics.is_empty() {
+    let header_height = header_lines.len() as u16;
+
+    if let Some(pb) = playback {
+        // 播放中：展示时间同步歌词
+        render_playing(frame, inner, header_lines, header_height, pb);
+    } else {
+        // 浏览：展示歌曲元数据 + 歌词
+        render_browsing(frame, inner, header_lines, detail);
+    }
+}
+
+/// 播放中歌曲的右侧内容：标题 + 时间同步歌词
+fn render_playing(
+    frame: &mut Frame,
+    inner: Rect,
+    header_lines: Vec<Line<'static>>,
+    header_height: u16,
+    pb: PlaybackInfo<'_>,
+) {
+    match pb.parsed_lyrics {
+        ParsedLyrics::Synced(lrc_lines) => {
+            let header_para = Paragraph::new(header_lines);
+            let header_rect = Rect { height: header_height.min(inner.height), ..inner };
+            frame.render_widget(header_para, header_rect);
+
+            let lyrics_y = inner.y + header_height + 1;
+            if lyrics_y < inner.y + inner.height {
+                let lyrics_rect = Rect {
+                    x: inner.x,
+                    y: lyrics_y,
+                    width: inner.width,
+                    height: inner.height.saturating_sub(header_height + 1),
+                };
+                render_synced_lyrics(frame, lyrics_rect, lrc_lines, pb.current_secs);
+            }
+        }
+        ParsedLyrics::Plain(plain_lines) => {
+            let mut lines = header_lines;
+            if !plain_lines.is_empty() {
+                lines.push(Line::from(""));
+                for line in plain_lines {
+                    lines.push(Line::from(Span::styled(
+                        line.clone(),
+                        Theme::secondary(),
+                    )));
+                }
+            }
+            let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+            frame.render_widget(para, inner);
+        }
+        ParsedLyrics::Empty => {
+            let mut lines = header_lines;
             lines.push(Line::from(""));
-            for line in detail.lyrics.lines() {
+            lines.push(Line::from(Span::styled(
+                t!("player.no_lyrics"),
+                Theme::secondary(),
+            )));
+            let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+            frame.render_widget(para, inner);
+        }
+    }
+}
+
+/// 浏览歌曲的右侧内容：标题 + 元数据 + 歌词
+fn render_browsing(
+    frame: &mut Frame,
+    inner: Rect,
+    header_lines: Vec<Line<'static>>,
+    detail: &PublicSongDetail,
+) {
+    let mut lines = header_lines;
+
+    // 副标题
+    if !detail.subtitle.is_empty() {
+        lines.push(Line::from(Span::styled(
+            detail.subtitle.clone(),
+            Theme::secondary(),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // 时长 · 播放数 · 喜欢数
+    lines.push(Line::from(vec![
+        Span::styled(format!("{}  ", detail.format_duration()), Theme::active()),
+        Span::styled(format!("\u{25b6} {}  ", detail.play_count), Theme::secondary()),
+        Span::styled(format!("\u{2665} {}", detail.like_count), Theme::secondary()),
+    ]));
+
+    // 标签
+    if !detail.tags.is_empty() {
+        let mut tag_spans: Vec<Span> = Vec::new();
+        let mut prev_color: Option<Color> = None;
+        for (i, tag) in detail.tags.iter().enumerate() {
+            let style = Theme::tag_badge(i, prev_color);
+            prev_color = style.bg;
+            tag_spans.push(Span::styled(format!(" {} ", tag.name), style));
+        }
+        lines.push(Line::from(tag_spans));
+    }
+
+    // 原作信息
+    if !detail.origin_infos.is_empty() {
+        lines.push(Line::from(Span::styled(
+            t!("miller.origin").to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        for info in &detail.origin_infos {
+            let title = info.title.as_deref().unwrap_or("?");
+            let artist = info.artist.as_deref().unwrap_or("");
+            let text = if artist.is_empty() {
+                format!("  {title}")
+            } else {
+                format!("  {title} - {artist}")
+            };
+            lines.push(Line::from(Span::styled(text, Theme::secondary())));
+        }
+    }
+
+    // 发行日期
+    {
+        let date_str = detail.release_time.format("%Y-%m-%d").to_string();
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}: ", t!("miller.release_date")),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(date_str, Theme::secondary()),
+        ]));
+    }
+
+    // 创作团队
+    if !detail.production_crew.is_empty() {
+        lines.push(Line::from(Span::styled(
+            t!("miller.crew").to_string(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        for member in &detail.production_crew {
+            let name = member.person_name.as_deref().unwrap_or("?");
+            lines.push(Line::from(Span::styled(
+                format!("  {} \u{2014} {name}", member.role),
+                Theme::secondary(),
+            )));
+        }
+    }
+
+    // 外部链接
+    if !detail.external_links.is_empty() {
+        let mut link_spans: Vec<Span> = Vec::new();
+        for (i, link) in detail.external_links.iter().enumerate() {
+            if i > 0 {
+                link_spans.push(Span::styled(" \u{00b7} ", Theme::secondary()));
+            }
+            link_spans.push(Span::styled(
+                format!(" {} ", link.platform),
+                Theme::link_badge(),
+            ));
+        }
+        link_spans.push(Span::styled(
+            format!("  {}", t!("miller.links_hint")),
+            Style::default().fg(Color::DarkGray),
+        ));
+        lines.push(Line::from(link_spans));
+    }
+
+    // 简介
+    if !detail.description.is_empty() {
+        lines.push(Line::from(""));
+        for line in detail.description.lines() {
+            lines.push(Line::from(Span::styled(
+                line.to_string(),
+                Theme::secondary(),
+            )));
+        }
+    }
+
+    // 歌词（解析为纯文本展示，不做时间同步）
+    let parsed = crate::ui::lyrics::parse(&detail.lyrics);
+    match &parsed {
+        ParsedLyrics::Synced(lrc) if !lrc.is_empty() => {
+            lines.push(Line::from(""));
+            for l in lrc {
                 lines.push(Line::from(Span::styled(
-                    line.to_string(),
+                    format!("  {}", l.text),
                     Theme::secondary(),
                 )));
             }
         }
+        ParsedLyrics::Plain(plain) if !plain.is_empty() => {
+            lines.push(Line::from(""));
+            for l in plain {
+                lines.push(Line::from(Span::styled(l.clone(), Theme::secondary())));
+            }
+        }
+        _ => {}
     }
 
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, inner);
 }
 
-fn format_time(secs: u32) -> String {
-    let m = secs / 60;
-    let s = secs % 60;
-    format!("{m:02}:{s:02}")
+/// 渲染时间同步歌词：当前行高亮居中，上下文淡色
+fn render_synced_lyrics(
+    frame: &mut Frame,
+    area: Rect,
+    lrc_lines: &[super::lyrics::LrcLine],
+    current_secs: u32,
+) {
+    let visible_rows = area.height as usize;
+    if visible_rows == 0 || lrc_lines.is_empty() {
+        return;
+    }
+
+    // 当前行索引
+    let cur_idx = {
+        let idx = lrc_lines.partition_point(|l| l.time_secs <= current_secs);
+        if idx == 0 { 0 } else { idx - 1 }
+    };
+
+    // 每行歌词占 2 行（歌词 + 空行），计算可显示的歌词条数
+    let visible_items = (visible_rows + 1) / 2; // 最后一条不需要尾部空行
+
+    // 计算窗口起始位置，让当前行尽量居中
+    let half = visible_items / 2;
+    let start = if cur_idx <= half {
+        0
+    } else if cur_idx + visible_items - half > lrc_lines.len() {
+        lrc_lines.len().saturating_sub(visible_items)
+    } else {
+        cur_idx - half
+    };
+    let end = (start + visible_items).min(lrc_lines.len());
+
+    let mut lines: Vec<Line> = Vec::new();
+    for i in start..end {
+        if i == cur_idx {
+            lines.push(Line::from(Span::styled(
+                format!("\u{25b6} {}", lrc_lines[i].text),
+                Theme::highlight(),
+            )));
+        } else {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", lrc_lines[i].text),
+                Theme::secondary(),
+            )));
+        }
+        // 每行歌词后加空行（最后一行除外）
+        if i + 1 < end {
+            lines.push(Line::from(""));
+        }
+    }
+
+    let para = Paragraph::new(lines);
+    frame.render_widget(para, area);
 }

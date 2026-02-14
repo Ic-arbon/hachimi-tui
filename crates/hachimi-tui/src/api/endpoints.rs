@@ -1,3 +1,6 @@
+// TODO: API 接口预定义，部分接口尚未接入
+#![allow(dead_code)]
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;

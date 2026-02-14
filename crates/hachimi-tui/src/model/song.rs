@@ -123,6 +123,7 @@ pub struct TagRecommendResp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: 用户歌曲分页
 pub struct PageByUserResp {
     pub songs: Vec<PublicSongDetail>,
     pub total: i64,
@@ -139,6 +140,7 @@ impl PublicSongDetail {
 }
 
 impl SearchSongItem {
+    #[allow(dead_code)] // TODO: 搜索结果时长显示
     pub fn format_duration(&self) -> String {
         let mins = self.duration_seconds / 60;
         let secs = self.duration_seconds % 60;

@@ -1,11 +1,19 @@
-use crate::api::endpoints::{RecentQuery, SongSearchQuery};
+use crate::api::endpoints::{
+    HistoryCursorQuery, PageByUserQuery, PlaylistSearchQuery, RecentQuery, SongSearchQuery,
+    UserSearchQuery,
+};
 use crate::model::auth::LoginReq;
 use crate::model::queue::MusicQueueItem;
 use crate::model::song::PublicSongDetail;
 use crate::ui::login::{LoginState, LoginStep};
-use crate::ui::navigation::NavNode;
+use crate::ui::navigation::{NavNode, SearchSort, SearchType};
 
 use super::{App, AppMessage, DataPayload, InputMode};
+
+const COVER_DEBOUNCE_MS: u64 = 150;
+const SEARCH_PAGE_SIZE: i32 = 30;
+const HISTORY_PAGE_SIZE: i32 = 50;
+const IMAGE_RESIZE_BASE: u32 = 1200;
 
 impl App {
     // — 认证 —
@@ -80,16 +88,118 @@ impl App {
         self.username = None;
         self.cache.songs.clear();
         self.cache.loading.clear();
+        self.cache.images.clear();
+        self.cache.image_bytes.clear();
+        self.cache.image_order.clear();
+        self.cache.tags = None;
+        self.cache.playlists = None;
+        self.cache.queue_song_detail.clear();
         self.login = LoginState::new();
         self.input_mode = InputMode::Login;
+    }
+
+    /// 恢复上次退出时的播放
+    pub(crate) fn resume_playback(&mut self) {
+        if let Some(song) = self.queue.current_song().cloned() {
+            self.start_audio_fetch(song.id, &song.name, &song.artist);
+        }
+    }
+
+    // — 搜索 —
+
+    pub(crate) fn execute_search(&mut self) {
+        let query = self.search.query.trim().to_string();
+        let sort = self.search.sort;
+        let tx = self.msg_tx.clone();
+        let client = self.client.clone();
+
+        // 清空旧结果
+        self.cache.songs.remove(&NavNode::SearchResults);
+        self.cache.search_users.clear();
+        self.cache.search_playlists.clear();
+        self.cache.loading.insert(NavNode::SearchResults);
+
+        let sort_by = match sort {
+            SearchSort::Relevance => None,
+            SearchSort::Newest => Some("release_time_desc".to_string()),
+            SearchSort::Oldest => Some("release_time_asc".to_string()),
+        };
+
+        // 同时搜索三种类型
+        tokio::spawn(async move {
+            let song_q = SongSearchQuery {
+                q: query.clone(),
+                limit: Some(SEARCH_PAGE_SIZE),
+                offset: None,
+                filter: None,
+                sort_by,
+            };
+            let user_q = UserSearchQuery {
+                q: query.clone(),
+                page: 0,
+                size: SEARCH_PAGE_SIZE,
+            };
+            let playlist_q = PlaylistSearchQuery {
+                q: query,
+                limit: Some(SEARCH_PAGE_SIZE as i64),
+                offset: None,
+                sort_by: None,
+                user_id: None,
+            };
+            let (songs_res, users_res, playlists_res) = tokio::join!(
+                client.search_songs(&song_q),
+                client.search_users(&user_q),
+                client.search_playlists(&playlist_q),
+            );
+
+            match songs_res {
+                Ok(resp) => {
+                    let songs: Vec<PublicSongDetail> =
+                        resp.hits.into_iter().map(|s| s.into_song_detail()).collect();
+                    let _ = tx.send(AppMessage::DataLoaded(DataPayload::Songs(
+                        NavNode::SearchResults,
+                        songs,
+                    )));
+                }
+                Err(e) => {
+                    let _ = tx.send(AppMessage::DataLoaded(DataPayload::Songs(
+                        NavNode::SearchResults,
+                        vec![],
+                    )));
+                    let _ = tx.send(AppMessage::Error(e.to_string()));
+                }
+            }
+            match users_res {
+                Ok(resp) => {
+                    let _ = tx.send(AppMessage::DataLoaded(DataPayload::SearchUsers(resp.hits)));
+                }
+                Err(e) => {
+                    let _ = tx.send(AppMessage::DataLoaded(DataPayload::SearchUsers(vec![])));
+                    let _ = tx.send(AppMessage::Error(e.to_string()));
+                }
+            }
+            match playlists_res {
+                Ok(resp) => {
+                    let _ = tx.send(AppMessage::DataLoaded(DataPayload::SearchPlaylists(resp.hits)));
+                }
+                Err(e) => {
+                    let _ = tx.send(AppMessage::DataLoaded(DataPayload::SearchPlaylists(vec![])));
+                    let _ = tx.send(AppMessage::Error(e.to_string()));
+                }
+            }
+        });
     }
 
     // — 数据加载 —
 
     pub(crate) fn load_node_data(&mut self, node: &NavNode) {
-        // Categories 用 tag_cache 而非 song_cache
+        // Categories 用 tag_cache，MyPlaylists 用 playlist_cache
         if *node == NavNode::Categories {
-            if self.cache.loading.contains(node) || !self.cache.tags.is_empty() {
+            if self.cache.loading.contains(node) || self.cache.tags.is_some() {
+                return;
+            }
+        } else if *node == NavNode::MyPlaylists {
+            if self.cache.loading.contains(node) || self.cache.playlists.is_some() {
                 return;
             }
         } else if self.cache.loading.contains(node) || self.cache.songs.contains_key(node) {
@@ -121,11 +231,25 @@ impl App {
                 return;
             }
 
+            // MyPlaylists 走单独的歌单列表加载流程
+            if node_owned == NavNode::MyPlaylists {
+                match client.my_playlists().await {
+                    Ok(resp) => {
+                        let _ = tx.send(AppMessage::DataLoaded(DataPayload::Playlists(resp.playlists)));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AppMessage::DataLoaded(DataPayload::Playlists(vec![])));
+                        let _ = tx.send(AppMessage::Error(e.to_string()));
+                    }
+                }
+                return;
+            }
+
             let result = match &node_owned {
                 NavNode::LatestReleases => client
                     .recent_songs(&RecentQuery {
                         cursor: None,
-                        limit: 30,
+                        limit: SEARCH_PAGE_SIZE,
                         after: None,
                     })
                     .await
@@ -145,13 +269,35 @@ impl App {
                     client
                         .search_songs(&SongSearchQuery {
                             q: String::new(),
-                            limit: Some(30),
+                            limit: Some(SEARCH_PAGE_SIZE),
                             offset: None,
                             filter: Some(format!("tags = \"{}\"", name)),
                             sort_by: Some("release_time_desc".to_string()),
                         })
                         .await
                         .map(|r| r.hits.into_iter().map(|s| s.into_song_detail()).collect())
+                }
+                NavNode::History => {
+                    client
+                        .play_history(&HistoryCursorQuery { cursor: None, size: HISTORY_PAGE_SIZE })
+                        .await
+                        .map(|r| r.list.into_iter().map(|h| h.song_info).collect())
+                }
+                NavNode::PlaylistDetail { id } => {
+                    client
+                        .playlist_detail_private(*id)
+                        .await
+                        .map(|r| r.songs.into_iter().map(|s| s.into_song_detail()).collect())
+                }
+                NavNode::UserDetail { id } => {
+                    client
+                        .songs_by_user(&PageByUserQuery {
+                            user_id: *id,
+                            page: None,
+                            size: Some(HISTORY_PAGE_SIZE as i64),
+                        })
+                        .await
+                        .map(|r| r.songs)
                 }
                 _ => return,
             };
@@ -186,9 +332,15 @@ impl App {
             }
         } else if node == NavNode::Categories {
             // 加载选中标签的歌曲预览
-            if let Some(tag_name) = self.cache.tags.get(sel).cloned() {
+            if let Some(tag_name) = self.cache.tags.as_ref().and_then(|t| t.get(sel)).cloned() {
                 let tag_node = NavNode::Tag { name: tag_name };
                 self.load_node_data(&tag_node);
+            }
+        } else if node == NavNode::MyPlaylists {
+            // 加载选中歌单的歌曲预览
+            if let Some(pl) = self.cache.playlists.as_ref().and_then(|p| p.get(sel)) {
+                let pl_node = NavNode::PlaylistDetail { id: pl.id };
+                self.load_node_data(&pl_node);
             }
         }
     }
@@ -208,6 +360,7 @@ impl App {
     pub(crate) fn play_next(&mut self) {
         let mode = self.settings.player.default_play_mode.clone();
         if let Some(item) = self.queue.next_with_mode(&mode).cloned() {
+            self.player.follow_playback = true;
             self.start_audio_fetch(item.id, &item.name, &item.artist);
         }
     }
@@ -215,6 +368,7 @@ impl App {
     pub(crate) fn play_prev(&mut self) {
         let mode = self.settings.player.default_play_mode.clone();
         if let Some(item) = self.queue.prev_with_mode(&mode).cloned() {
+            self.player.follow_playback = true;
             self.start_audio_fetch(item.id, &item.name, &item.artist);
         }
     }
@@ -244,10 +398,99 @@ impl App {
         }
     }
 
+    /// 替换队列为歌曲列表并播放指定索引
+    fn play_from_list(&mut self, songs: &[PublicSongDetail], index: usize) {
+        self.queue.clear();
+        for song in songs {
+            self.queue.add(Self::song_to_queue_item(song));
+        }
+        self.queue.current_index = Some(index);
+        self.player.follow_playback = true;
+        let song = &songs[index];
+        self.start_audio_fetch(song.id, &song.title, &song.uploader_name);
+    }
+
+    /// 播放展开页当前显示的歌曲（如果不是正在播放的那首）
+    pub(crate) fn play_expanded_song(&mut self) {
+        // 复现 render_player_view 中确定展示歌曲的逻辑
+        let node = self.nav.current().node.clone();
+        let sel = self.nav.current().selected;
+
+        let browsed_detail = if node == NavNode::Queue {
+            self.queue.songs.get(sel).map(|item| {
+                self.cache.queue_song_detail.get(&item.id).cloned()
+                    .unwrap_or_else(|| item.to_song_detail())
+            })
+        } else if node == NavNode::SearchResults {
+            match self.search.search_type {
+                SearchType::Song => {
+                    self.cache.songs.get(&node).and_then(|s| s.get(sel)).cloned()
+                }
+                _ => None,
+            }
+        } else if !node.has_static_children() && node != NavNode::Settings {
+            self.cache.songs.get(&node).and_then(|s| s.get(sel)).cloned()
+        } else {
+            None
+        };
+
+        let detail = if self.player.follow_playback {
+            self.player.current_detail.clone().or(browsed_detail)
+        } else {
+            browsed_detail.or_else(|| self.player.current_detail.clone())
+        };
+
+        let Some(detail) = detail else { return };
+
+        // 如果已经在播放这首歌，不重复触发
+        if self.player.current_detail.as_ref().map_or(false, |p| p.id == detail.id) {
+            return;
+        }
+
+        // 把当前列表的所有歌曲替换进队列（与 nav_drill_in 行为一致）
+        if let Some(songs) = self.cache.songs.get(&node).cloned() {
+            if let Some(idx) = songs.iter().position(|s| s.id == detail.id) {
+                self.play_from_list(&songs, idx);
+                return;
+            }
+        } else if node == NavNode::Queue {
+            // 已在队列中，只切换 current_index
+            if let Some(idx) = self.queue.songs.iter().position(|q| q.id == detail.id) {
+                self.queue.current_index = Some(idx);
+            }
+        } else {
+            // 没有列表上下文，单独加入
+            let item = Self::song_to_queue_item(&detail);
+            if !self.queue.songs.iter().any(|q| q.id == item.id) {
+                self.queue.add(item);
+            }
+            self.queue.current_index = self.queue.songs.iter().position(|q| q.id == detail.id);
+        }
+        self.player.follow_playback = true;
+        self.start_audio_fetch(detail.id, &detail.title, &detail.uploader_name);
+    }
+
     pub(crate) fn add_selected_to_queue(&mut self) {
         if let Some(song) = self.selected_song().cloned() {
             let item = Self::song_to_queue_item(&song);
             self.queue.add(item);
+        }
+    }
+
+    pub(crate) fn remove_from_queue(&mut self) {
+        if self.nav.current().node != NavNode::Queue {
+            return;
+        }
+        let sel = self.nav.current().selected;
+        if sel < self.queue.songs.len() {
+            self.queue.remove(sel);
+            // 修正选中索引
+            let len = self.queue.songs.len();
+            if len == 0 {
+                self.nav.current_mut().selected = 0;
+            } else if sel >= len {
+                self.nav.current_mut().selected = len - 1;
+            }
         }
     }
 
@@ -256,6 +499,16 @@ impl App {
         self.player.bar.is_loading = true;
         self.player.bar.title = title.to_string();
         self.player.bar.artist = artist.to_string();
+
+        // 记录播放历史
+        let history_client = self.client.clone();
+        tokio::spawn(async move {
+            if history_client.is_authenticated().await {
+                let _ = history_client.touch_play_history(song_id).await;
+            } else {
+                let _ = history_client.touch_play_history_anonymous(song_id).await;
+            }
+        });
 
         let tx = self.msg_tx.clone();
         let client = self.client.clone();
@@ -323,6 +576,29 @@ impl App {
 
     // — Miller Columns 导航 —
 
+    pub(crate) fn after_nav_move(&mut self) {
+        self.maybe_load_preview_data();
+        self.maybe_fetch_song_detail();
+        self.maybe_fetch_queue_detail();
+        self.maybe_load_cover_image();
+    }
+
+    /// 用户手动改变选中项后的共享后处理
+    fn on_selection_changed(&mut self) {
+        if self.player.expanded {
+            self.player.follow_playback = false;
+        }
+        self.scroll_tick = 0;
+        self.after_nav_move();
+    }
+
+    fn push_and_load(&mut self, node: NavNode) {
+        self.load_node_data(&node);
+        self.nav.push(node);
+        self.scroll_tick = 0;
+        self.after_nav_move();
+    }
+
     pub(crate) fn current_list_len(&self) -> usize {
         let node = &self.nav.current().node;
         if *node == NavNode::Settings {
@@ -330,7 +606,19 @@ impl App {
         } else if node.has_static_children() {
             node.children().len()
         } else if *node == NavNode::Categories {
-            self.cache.tags.len()
+            self.cache.tags.as_ref().map_or(0, |t| t.len())
+        } else if *node == NavNode::MyPlaylists {
+            self.cache.playlists.as_ref().map_or(0, |p| p.len())
+        } else if *node == NavNode::Queue {
+            self.queue.songs.len()
+        } else if *node == NavNode::SearchResults {
+            match self.search.search_type {
+                SearchType::Song => {
+                    self.cache.songs.get(&NavNode::SearchResults).map_or(0, |s| s.len())
+                }
+                SearchType::User => self.cache.search_users.len(),
+                SearchType::Playlist => self.cache.search_playlists.len(),
+            }
         } else if let Some(songs) = self.cache.songs.get(node) {
             songs.len()
         } else {
@@ -344,23 +632,17 @@ impl App {
             let sel = self.nav.current().selected;
             if sel + 1 < len {
                 self.nav.current_mut().selected = sel + 1;
-                self.scroll_tick = 0;
             }
         }
-        self.maybe_load_preview_data();
-        self.maybe_fetch_song_detail();
-        self.maybe_load_cover_image();
+        self.on_selection_changed();
     }
 
     pub(crate) fn nav_up(&mut self) {
         let sel = self.nav.current().selected;
         if sel > 0 {
             self.nav.current_mut().selected = sel - 1;
-            self.scroll_tick = 0;
         }
-        self.maybe_load_preview_data();
-        self.maybe_fetch_song_detail();
-        self.maybe_load_cover_image();
+        self.on_selection_changed();
     }
 
     pub(crate) fn nav_drill_in(&mut self) {
@@ -368,7 +650,11 @@ impl App {
         let sel = self.nav.current().selected;
         if node == NavNode::Settings {
             crate::ui::settings_view::cycle_setting(&mut self.settings, sel);
-            // 播放模式已直接修改 settings，无需同步
+            if sel == 3 {
+                // cover_scale 变化，清除协议缓存（保留原始字节），触发从缓存字节重新处理
+                self.cache.images.clear();
+                self.maybe_load_cover_image();
+            }
             let _ = self.settings.save();
             return;
         }
@@ -376,40 +662,52 @@ impl App {
             let children = node.children();
             if sel < children.len() {
                 let child = children[sel].clone();
-                if child.needs_dynamic_data() {
-                    self.load_node_data(&child);
-                }
-                self.nav.push(child);
-                self.scroll_tick = 0;
-                self.maybe_load_preview_data();
-                self.maybe_load_cover_image();
+                self.push_and_load(child);
             }
         } else if node == NavNode::Categories {
             // 进入选中的标签
-            if let Some(tag_name) = self.cache.tags.get(sel).cloned() {
-                let tag_node = NavNode::Tag { name: tag_name };
-                self.load_node_data(&tag_node);
-                self.nav.push(tag_node);
-                self.scroll_tick = 0;
-                self.maybe_load_preview_data();
-                self.maybe_load_cover_image();
+            if let Some(tag_name) = self.cache.tags.as_ref().and_then(|t| t.get(sel)).cloned() {
+                self.push_and_load(NavNode::Tag { name: tag_name });
+            }
+        } else if node == NavNode::MyPlaylists {
+            // 进入选中的歌单
+            if let Some(pl) = self.cache.playlists.as_ref().and_then(|p| p.get(sel)) {
+                let pl_node = NavNode::PlaylistDetail { id: pl.id };
+                self.push_and_load(pl_node);
+            }
+        } else if node == NavNode::Queue {
+            // 队列中按 Enter 播放选中歌曲
+            if sel < self.queue.songs.len() {
+                self.queue.current_index = Some(sel);
+                let item = self.queue.songs[sel].clone();
+                self.start_audio_fetch(item.id, &item.name, &item.artist);
+            }
+        } else if node == NavNode::SearchResults {
+            match self.search.search_type {
+                SearchType::Song => {
+                    if let Some(songs) = self.cache.songs.get(&NavNode::SearchResults).cloned() {
+                        if sel < songs.len() {
+                            self.play_from_list(&songs, sel);
+                        }
+                    }
+                }
+                SearchType::Playlist => {
+                    if let Some(pl) = self.cache.search_playlists.get(sel) {
+                        let pl_node = NavNode::PlaylistDetail { id: pl.id };
+                        self.push_and_load(pl_node);
+                    }
+                }
+                SearchType::User => {
+                    if let Some(user) = self.cache.search_users.get(sel) {
+                        self.push_and_load(NavNode::UserDetail { id: user.uid });
+                    }
+                }
             }
         } else {
             // 当前节点是歌曲列表，按 Enter 播放选中歌曲
             if let Some(songs) = self.cache.songs.get(&node).cloned() {
                 if sel < songs.len() {
-                    // 替换队列为当前列表所有歌曲
-                    self.queue.clear();
-                    for song in &songs {
-                        self.queue.add(Self::song_to_queue_item(song));
-                    }
-                    self.queue.current_index = Some(sel);
-
-                    // 播放选中歌曲
-                    let song = &songs[sel];
-                    self.start_audio_fetch(
-                        song.id, &song.title, &song.uploader_name,
-                    );
+                    self.play_from_list(&songs, sel);
                 }
             }
         }
@@ -418,28 +716,20 @@ impl App {
     pub(crate) fn nav_drill_out(&mut self) {
         self.nav.pop();
         self.scroll_tick = 0;
-        self.maybe_load_preview_data();
-        self.maybe_fetch_song_detail();
-        self.maybe_load_cover_image();
+        self.after_nav_move();
     }
 
     pub(crate) fn nav_top(&mut self) {
         self.nav.current_mut().selected = 0;
-        self.scroll_tick = 0;
-        self.maybe_load_preview_data();
-        self.maybe_fetch_song_detail();
-        self.maybe_load_cover_image();
+        self.on_selection_changed();
     }
 
     pub(crate) fn nav_bottom(&mut self) {
         let len = self.current_list_len();
         if len > 0 {
             self.nav.current_mut().selected = len - 1;
-            self.scroll_tick = 0;
         }
-        self.maybe_load_preview_data();
-        self.maybe_fetch_song_detail();
-        self.maybe_load_cover_image();
+        self.on_selection_changed();
     }
 
     // — 图片加载 —
@@ -459,18 +749,24 @@ impl App {
         let client = self.client.clone();
         let url = url.to_string();
         let hint_rect = self.cache.last_image_rect;
+        // 优先从已缓存的压缩字节读取，跳过网络下载
+        let cached_bytes = self.cache.image_bytes.get(&url).cloned();
 
         tokio::spawn(async move {
-            let resp = match client.get_audio_stream(&url).await {
-                Ok(r) if r.status().is_success() => r,
-                _ => return,
-            };
-            let bytes = match resp.bytes().await {
-                Ok(b) => b,
-                _ => return,
+            let data = if let Some(bytes) = cached_bytes {
+                bytes
+            } else {
+                let resp = match client.get_audio_stream(&url).await {
+                    Ok(r) if r.status().is_success() => r,
+                    _ => return,
+                };
+                match resp.bytes().await {
+                    Ok(b) => b.to_vec(),
+                    _ => return,
+                }
             };
             // 解码 + 裁剪 + resize + protocol 编码全部在 blocking 线程
-            let data = bytes.to_vec();
+            let raw_bytes = data.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let img = image::load_from_memory(&data).ok()?;
                 let min_side = img.width().min(img.height());
@@ -479,16 +775,26 @@ impl App {
                 let img = img.crop_imm(x, y, min_side, min_side);
 
                 let (fw, fh) = picker.font_size();
-                let g = crate::ui::util::gcd(fw, fh);
-                let lcm = (fw / g) as u32 * fh as u32;
-                let n = (800u32 / lcm).max(1);
-                let target = n * lcm;
-                let img = img.resize_exact(target, target, image::imageops::FilterType::Triangle);
+
+                // 将正方形源图缩放到 hint_rect 的精确像素尺寸（cover/fill）。
+                // 这样 Fit 模式发现图已是正确大小，不 resize → 无黑边。
+                // hint_rect 无效时回退到 LCM 对齐正方形。
+                let img = if hint_rect.width > 0 && hint_rect.height > 0 {
+                    let tw = hint_rect.width as u32 * fw as u32;
+                    let th = hint_rect.height as u32 * fh as u32;
+                    img.resize_to_fill(tw, th, image::imageops::FilterType::Triangle)
+                } else {
+                    let g = crate::ui::util::gcd(fw, fh);
+                    let lcm = (fw / g) as u32 * fh as u32;
+                    let n = (IMAGE_RESIZE_BASE / lcm).max(1);
+                    let target = n * lcm;
+                    img.resize_exact(target, target, image::imageops::FilterType::Triangle)
+                };
+
                 let mut picker = picker;
                 let mut protocol = picker.new_resize_protocol(img);
 
-                // 用上一次渲染的 widget 区域预编码终端协议数据，
-                // 使 draw 时 needs_resize 返回 None，避免主线程阻塞
+                // 预编码：使 draw 时 needs_resize 返回 None，避免主线程阻塞
                 if hint_rect.width > 0 && hint_rect.height > 0 {
                     let resize = ratatui_image::Resize::Fit(None);
                     if let Some(rect) = protocol.needs_resize(&resize, hint_rect) {
@@ -500,7 +806,7 @@ impl App {
             })
             .await;
             if let Ok(Some(protocol)) = result {
-                let _ = tx.send(AppMessage::ImageFetched { url, protocol });
+                let _ = tx.send(AppMessage::ImageFetched { url, protocol, raw_bytes });
             }
         });
     }
@@ -511,7 +817,7 @@ impl App {
         let sel = self.nav.current().selected;
 
         // 仅对歌曲列表节点生效
-        if node.has_static_children() || node == NavNode::Categories || node == NavNode::Settings {
+        if node.has_static_children() || node == NavNode::Categories || node == NavNode::MyPlaylists || node == NavNode::Queue || node == NavNode::Settings {
             return;
         }
 
@@ -533,22 +839,62 @@ impl App {
         }
     }
 
+    /// 队列预览时异步获取选中项的完整歌曲详情
+    pub(crate) fn maybe_fetch_queue_detail(&mut self) {
+        if self.nav.current().node != NavNode::Queue {
+            return;
+        }
+        let sel = self.nav.current().selected;
+        if let Some(item) = self.queue.songs.get(sel) {
+            let song_id = item.id;
+            if self.cache.queue_song_detail.contains_key(&song_id)
+                || self.cache.detail_loading.contains(&song_id)
+            {
+                return;
+            }
+            self.cache.detail_loading.insert(song_id);
+            let tx = self.msg_tx.clone();
+            let client = self.client.clone();
+
+            tokio::spawn(async move {
+                if let Ok(detail) = client.song_detail_by_id(song_id).await {
+                    let _ = tx.send(AppMessage::SongDetailFetched {
+                        node: NavNode::Queue,
+                        index: 0,
+                        detail,
+                    });
+                }
+            });
+        }
+    }
+
     /// 防抖加载预览封面：取消旧定时器，停下 150ms 后才真正发起请求
     pub(crate) fn maybe_load_cover_image(&mut self) {
         // 取消上一次未触发的防抖
         if let Some(h) = self.cover_debounce.take() {
             h.abort();
         }
-        if let Some(song) = self.selected_song().cloned() {
-            let url = &song.cover_url;
+        let node = &self.nav.current().node;
+        let idx = self.nav.current().selected;
+        let cover_url = if *node == NavNode::Queue {
+            self.queue.songs.get(idx).map(|q| q.cover_url.clone())
+        } else if *node == NavNode::SearchResults {
+            match self.search.search_type {
+                SearchType::Song => self.selected_song().map(|s| s.cover_url.clone()),
+                SearchType::User => self.cache.search_users.get(idx).and_then(|u| u.avatar_url.clone()),
+                SearchType::Playlist => self.cache.search_playlists.get(idx).and_then(|p| p.cover_url.clone()),
+            }
+        } else {
+            self.selected_song().map(|s| s.cover_url.clone())
+        };
+        if let Some(url) = cover_url {
             if !url.is_empty()
-                && !self.cache.images.contains_key(url)
-                && !self.cache.images_loading.contains(url)
+                && !self.cache.images.contains_key(&url)
+                && !self.cache.images_loading.contains(&url)
             {
                 let tx = self.msg_tx.clone();
-                let url = url.clone();
                 self.cover_debounce = Some(tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(COVER_DEBOUNCE_MS)).await;
                     let _ = tx.send(AppMessage::DebouncedCoverLoad(url));
                 }));
             }

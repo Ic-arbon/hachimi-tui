@@ -10,6 +10,7 @@ pub fn config_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+#[allow(dead_code)] // TODO: 缓存目录
 pub fn cache_dir() -> Result<PathBuf> {
     let dir = dirs::cache_dir()
         .context("无法获取缓存目录")?
@@ -18,6 +19,7 @@ pub fn cache_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+#[allow(dead_code)] // TODO: 音频缓存
 pub fn audio_cache_dir() -> Result<PathBuf> {
     let dir = cache_dir()?.join("audio");
     std::fs::create_dir_all(&dir)?;

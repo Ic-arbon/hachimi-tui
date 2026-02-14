@@ -44,6 +44,7 @@ pub struct PlaylistSongItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: 收藏歌单
 pub struct FavoritePlaylistItem {
     pub metadata: PlaylistMetadata,
     pub order_index: i32,
@@ -65,6 +66,7 @@ pub struct PlaylistDetailResp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: 歌单搜索
 pub struct PlaylistSearchResp {
     pub hits: Vec<PlaylistMetadata>,
     pub query: String,
@@ -75,16 +77,19 @@ pub struct PlaylistSearchResp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: 歌单包含查询
 pub struct ListContainingResp {
     pub playlist_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: 创建歌单
 pub struct CreatePlaylistResp {
     pub id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: 收藏分页
 pub struct PageFavoritesResp {
     pub data: Vec<FavoritePlaylistItem>,
     pub page_index: i64,
@@ -93,6 +98,7 @@ pub struct PageFavoritesResp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // TODO: 收藏状态检查
 pub struct CheckFavoriteResp {
     pub playlist_id: i64,
     pub is_favorite: bool,
@@ -100,9 +106,38 @@ pub struct CheckFavoriteResp {
 }
 
 impl PlaylistSongItem {
+    #[allow(dead_code)] // TODO: 歌单歌曲时长显示
     pub fn format_duration(&self) -> String {
         let mins = self.duration_seconds / 60;
         let secs = self.duration_seconds % 60;
         format!("{mins}:{secs:02}")
+    }
+
+    pub fn into_song_detail(self) -> crate::model::song::PublicSongDetail {
+        crate::model::song::PublicSongDetail {
+            id: self.song_id,
+            display_id: self.song_display_id,
+            title: self.title,
+            subtitle: self.subtitle,
+            description: String::new(),
+            duration_seconds: self.duration_seconds,
+            tags: vec![],
+            lyrics: String::new(),
+            audio_url: String::new(),
+            cover_url: self.cover_url,
+            production_crew: vec![],
+            creation_type: 0,
+            origin_infos: vec![],
+            uploader_uid: self.uploader_uid,
+            uploader_name: self.uploader_name,
+            play_count: 0,
+            like_count: 0,
+            external_links: vec![],
+            create_time: self.add_time,
+            release_time: self.add_time,
+            explicit: None,
+            gain: None,
+            partial: true,
+        }
     }
 }

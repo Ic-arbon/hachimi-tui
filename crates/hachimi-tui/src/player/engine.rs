@@ -14,15 +14,17 @@ pub enum PlayerEvent {
     Progress { position_secs: u32, duration_secs: u32 },
     Error(String),
     TrackEnded,
+    #[allow(dead_code)] // TODO: 加载状态指示
     Loading,
 }
 
 /// UI 发给播放引擎的命令
 #[derive(Debug)]
 pub enum PlayerCommand {
-    Play(AudioSource, u32), // (source, duration_secs)
+    Play(AudioSource, u32, Option<f32>), // (source, duration_secs, gain_db)
     Pause,
     Resume,
+    #[allow(dead_code)] // TODO: 停止播放命令
     Stop,
     Seek(Duration),
     SetVolume(f32),
@@ -52,8 +54,8 @@ impl PlayerEngine {
         Ok(Self { cmd_tx, event_rx: Some(event_rx) })
     }
 
-    pub fn play(&self, source: AudioSource, duration_secs: u32) {
-        let _ = self.cmd_tx.send(PlayerCommand::Play(source, duration_secs));
+    pub fn play(&self, source: AudioSource, duration_secs: u32, gain_db: Option<f32>) {
+        let _ = self.cmd_tx.send(PlayerCommand::Play(source, duration_secs, gain_db));
     }
 
     pub fn pause(&self) {
@@ -64,6 +66,7 @@ impl PlayerEngine {
         let _ = self.cmd_tx.send(PlayerCommand::Resume);
     }
 
+    #[allow(dead_code)] // TODO: 停止播放
     pub fn stop(&self) {
         let _ = self.cmd_tx.send(PlayerCommand::Stop);
     }
@@ -95,20 +98,31 @@ fn player_thread(
 
     let mut has_source = false;
     let mut duration_secs: u32 = 0;
+    let mut user_volume: f32 = 1.0;
+    let mut gain_db: Option<f32> = None;
+
+    let effective_volume = |uv: f32, g: Option<f32>| -> f32 {
+        match g {
+            Some(db) => (uv * 10_f32.powf(db / 20.0)).clamp(0.0, 2.0),
+            None => uv,
+        }
+    };
 
     loop {
         // 非阻塞检查命令
         match cmd_rx.try_recv() {
             Ok(cmd) => match cmd {
-                PlayerCommand::Play(source, dur) => {
+                PlayerCommand::Play(source, dur, gain) => {
                     sink.stop();
                     duration_secs = dur;
+                    gain_db = gain;
                     match source {
                         AudioSource::Buffered(data) => {
                             let cursor = Cursor::new(data);
                             match Decoder::new(cursor) {
                                 Ok(decoder) => {
                                     sink.append(decoder);
+                                    sink.set_volume(effective_volume(user_volume, gain_db));
                                     sink.play();
                                     has_source = true;
                                     let _ = event_tx.send(PlayerEvent::Playing);
@@ -133,6 +147,7 @@ fn player_thread(
                 PlayerCommand::Stop => {
                     sink.stop();
                     has_source = false;
+                    gain_db = None;
                     let _ = event_tx.send(PlayerEvent::Stopped);
                 }
                 PlayerCommand::Seek(pos) => {
@@ -143,7 +158,8 @@ fn player_thread(
                     }
                 }
                 PlayerCommand::SetVolume(vol) => {
-                    sink.set_volume(vol);
+                    user_volume = vol;
+                    sink.set_volume(effective_volume(user_volume, gain_db));
                 }
             },
             Err(mpsc::error::TryRecvError::Empty) => {}

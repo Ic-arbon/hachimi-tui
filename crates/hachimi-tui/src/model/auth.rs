@@ -19,6 +19,7 @@ pub struct LoginReq {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LoginResp {
+    #[allow(dead_code)] // TODO: 用户 UID
     pub uid: i64,
     pub username: String,
     pub token: TokenPair,
@@ -36,6 +37,7 @@ pub struct GenerateCaptchaResp {
     pub url: String,
 }
 
+#[allow(dead_code)] // TODO: 验证码提交
 #[derive(Debug, Clone, Serialize)]
 pub struct SubmitCaptchaReq {
     pub captcha_key: String,

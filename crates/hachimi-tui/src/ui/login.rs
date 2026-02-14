@@ -113,7 +113,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
     );
 
     // 表单水平居中，宽度 44
-    let form_width = 44u16.min(area.width.saturating_sub(4));
+    let form_width = super::constants::LOGIN_FORM_WIDTH.min(area.width.saturating_sub(4));
     let h_pad = area.width.saturating_sub(form_width) / 2;
     let h_layout = Layout::default()
         .direction(Direction::Horizontal)

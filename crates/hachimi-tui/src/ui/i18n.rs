@@ -77,7 +77,7 @@ fn tr_en(key: &str) -> &'static str {
 
         // help
         "help.title" => "Key Bindings",
-        "help.close" => "Press q / ? / Esc to close",
+        "help.close" => "j/k scroll  \u{00b7}  q / ? / Esc to close",
         "help.section.global" => "Global",
         "help.section.navigation" => "Navigation",
         "help.section.search" => "Search",
@@ -97,6 +97,7 @@ fn tr_en(key: &str) -> &'static str {
         "help.drill_out" => "Drill out",
         "help.top_bottom" => "Top / Bottom",
         "help.add_queue" => "Add to queue",
+        "help.remove_queue" => "Remove from queue",
         "help.open_link" => "Open external link",
         "help.add_playlist" => "Add to playlist",
         "help.switch_type" => "Switch type",
@@ -106,10 +107,11 @@ fn tr_en(key: &str) -> &'static str {
         // logs
         "logs.title" => "Logs",
         "logs.empty" => "No logs yet",
-        "logs.hint" => "j/k scroll  \u{00b7}  Esc/! close",
+        "logs.hint" => "j/k scroll  \u{00b7}  h/l pan  \u{00b7}  Esc/! close",
 
         // player
         "player.no_song" => "No song playing",
+        "player.no_lyrics" => "No lyrics",
 
         // login
         "login.title" => "LOGIN",
@@ -122,8 +124,13 @@ fn tr_en(key: &str) -> &'static str {
         "login.continue_captcha" => "Continue after completing captcha",
         "login.logging_in" => "Logging in...",
 
+        // queue
+        "queue.empty" => "Queue is empty",
+        "queue.hint" => "d remove \u{00b7} Enter play",
+
         // miller
         "miller.no_songs" => "No songs",
+        "miller.no_playlists" => "No playlists",
         "miller.loading" => "Loading...",
         "miller.origin" => "Original",
         "miller.release_date" => "Released",
@@ -134,7 +141,6 @@ fn tr_en(key: &str) -> &'static str {
         // navigation
         "nav.root" => "Root",
         "nav.home" => "Home",
-        "nav.search" => "Search",
         "nav.library" => "Library",
         "nav.queue" => "Queue",
         "nav.settings" => "Settings",
@@ -156,6 +162,8 @@ fn tr_en(key: &str) -> &'static str {
         "search.song" => "song",
         "search.user" => "user",
         "search.playlist" => "playlist",
+        "search.no_results" => "No results",
+        "search.songs_count" => "Songs",
         "sort.relevance" => "relevance",
         "sort.newest" => "newest",
         "sort.oldest" => "oldest",
@@ -163,10 +171,20 @@ fn tr_en(key: &str) -> &'static str {
         // settings
         "settings.language" => "Language",
         "settings.play_mode" => "Play Mode",
+        "settings.replay_gain" => "Loudness Norm",
+        "settings.on" => "On",
+        "settings.off" => "Off",
         "settings.sequential" => "Sequential",
         "settings.shuffle" => "Shuffle",
         "settings.repeat_one" => "Repeat One",
         "settings.hint" => "Enter/l to change \u{00b7} h/\u{2190} go back",
+        "settings.desc.language" => "Interface display language",
+        "settings.desc.play_mode" => "Playback order when a track finishes: sequential, shuffle, or repeat one",
+        "settings.desc.replay_gain" => "Normalize volume across tracks to reduce loudness differences",
+        "settings.lang.en.desc" => "Full English interface",
+        "settings.lang.zh.desc" => "Simplified Chinese interface",
+        "settings.cover_scale" => "Cover Scale",
+        "settings.desc.cover_scale" => "Cover image scale in the browser preview (20%-100%)",
 
         _ => "???",
     }
@@ -182,7 +200,7 @@ fn tr_zh(key: &str) -> &'static str {
 
         // help
         "help.title" => "快捷键",
-        "help.close" => "按 q / ? / Esc 关闭",
+        "help.close" => "j/k 滚动  \u{00b7}  q / ? / Esc 关闭",
         "help.section.global" => "全局",
         "help.section.navigation" => "导航",
         "help.section.search" => "搜索",
@@ -202,6 +220,7 @@ fn tr_zh(key: &str) -> &'static str {
         "help.drill_out" => "返回",
         "help.top_bottom" => "顶部 / 底部",
         "help.add_queue" => "加入队列",
+        "help.remove_queue" => "从队列移除",
         "help.open_link" => "打开外部链接",
         "help.add_playlist" => "加入歌单",
         "help.switch_type" => "切换类型",
@@ -211,10 +230,11 @@ fn tr_zh(key: &str) -> &'static str {
         // logs
         "logs.title" => "日志",
         "logs.empty" => "暂无日志",
-        "logs.hint" => "j/k 滚动  \u{00b7}  Esc/! 关闭",
+        "logs.hint" => "j/k 滚动  \u{00b7}  h/l 左右滚动  \u{00b7}  Esc/! 关闭",
 
         // player
         "player.no_song" => "未在播放",
+        "player.no_lyrics" => "无歌词",
 
         // login
         "login.title" => "登录",
@@ -227,8 +247,13 @@ fn tr_zh(key: &str) -> &'static str {
         "login.continue_captcha" => "完成验证码后按 Enter 继续",
         "login.logging_in" => "正在登录...",
 
+        // queue
+        "queue.empty" => "队列为空",
+        "queue.hint" => "d 删除 \u{00b7} Enter 播放",
+
         // miller
         "miller.no_songs" => "暂无歌曲",
+        "miller.no_playlists" => "暂无歌单",
         "miller.loading" => "加载中...",
         "miller.origin" => "原作",
         "miller.release_date" => "发行日期",
@@ -239,7 +264,6 @@ fn tr_zh(key: &str) -> &'static str {
         // navigation
         "nav.root" => "根",
         "nav.home" => "首页",
-        "nav.search" => "搜索",
         "nav.library" => "曲库",
         "nav.queue" => "队列",
         "nav.settings" => "设置",
@@ -261,6 +285,8 @@ fn tr_zh(key: &str) -> &'static str {
         "search.song" => "歌曲",
         "search.user" => "用户",
         "search.playlist" => "歌单",
+        "search.no_results" => "无结果",
+        "search.songs_count" => "歌曲数",
         "sort.relevance" => "相关度",
         "sort.newest" => "最新",
         "sort.oldest" => "最早",
@@ -268,10 +294,20 @@ fn tr_zh(key: &str) -> &'static str {
         // settings
         "settings.language" => "语言",
         "settings.play_mode" => "播放模式",
+        "settings.replay_gain" => "响度均衡",
+        "settings.on" => "开",
+        "settings.off" => "关",
         "settings.sequential" => "顺序播放",
         "settings.shuffle" => "随机播放",
         "settings.repeat_one" => "单曲循环",
         "settings.hint" => "Enter/l 切换 \u{00b7} h/\u{2190} 返回",
+        "settings.desc.language" => "界面显示语言",
+        "settings.desc.play_mode" => "曲目结束后的播放顺序：顺序、随机或单曲循环",
+        "settings.desc.replay_gain" => "均衡各曲目音量，减少响度差异",
+        "settings.lang.en.desc" => "英文界面",
+        "settings.lang.zh.desc" => "简体中文界面",
+        "settings.cover_scale" => "封面缩放",
+        "settings.desc.cover_scale" => "浏览视图中预览封面图的缩放比例 (20%-100%)",
 
         _ => tr_en(key),
     }

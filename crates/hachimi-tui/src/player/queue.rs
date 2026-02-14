@@ -1,5 +1,4 @@
 use anyhow::Result;
-use rand::seq::SliceRandom;
 
 use crate::config::settings::PlayMode;
 use crate::model::queue::{MusicQueueItem, QueueState};

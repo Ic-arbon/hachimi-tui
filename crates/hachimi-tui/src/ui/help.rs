@@ -1,9 +1,9 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::Paragraph,
 };
 
 use super::theme::Theme;
@@ -19,7 +19,7 @@ fn help_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("+/= / -", t!("help.volume")),
                 ("> / <", t!("help.seek")),
                 ("s", t!("help.play_mode")),
-                ("v", t!("help.player_view")),
+                ("i", t!("help.player_view")),
                 // ("/", t!("help.search")),  // TODO: 搜索功能尚未实现
                 ("?", t!("help.help")),
                 ("!", t!("help.logs")),
@@ -34,6 +34,7 @@ fn help_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("h", t!("help.drill_out")),
                 ("g / G", t!("help.top_bottom")),
                 ("a", t!("help.add_queue")),
+                ("d", t!("help.remove_queue")),
                 ("o", t!("help.open_link")),
                 // ("p", t!("help.add_playlist")),  // TODO: 歌单功能尚未实现
             ],
@@ -51,30 +52,18 @@ fn help_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
 }
 
 /// 渲染悬浮帮助面板（居中覆盖）
-pub fn render(frame: &mut Frame, area: Rect) {
+pub fn render(frame: &mut Frame, area: Rect, scroll: u16) {
     let sections = help_sections();
 
-    // 计算内容尺寸
-    let content_width = 42u16;
-    let content_height = count_lines(&sections) as u16 + 4; // +4 for border + padding
+    // 面板外高度 = 2 (borders) + content_lines + 1 (hint)
+    let panel_h = count_lines(&sections) as u16 + 3;
 
-    let panel_w = content_width.min(area.width.saturating_sub(4));
-    let panel_h = content_height.min(area.height.saturating_sub(2));
-
-    let x = area.x + (area.width.saturating_sub(panel_w)) / 2;
-    let y = area.y + (area.height.saturating_sub(panel_h)) / 2;
-    let panel_area = Rect::new(x, y, panel_w, panel_h);
-
-    // 清除面板背景（左右各多 1 列，避免双宽字符被截断导致边框消失）
-    let clear_area = Rect::new(
-        panel_area.x.saturating_sub(1),
-        panel_area.y,
-        (panel_area.width + 2).min(area.width - panel_area.x.saturating_sub(1) + area.x),
-        panel_area.height,
+    let (content_area, hint_area) = super::util::overlay_panel(
+        frame, area, t!("help.title"),
+        super::constants::HELP_PANEL_WIDTH, panel_h,
     );
-    frame.render_widget(Clear, clear_area);
 
-    // 构建内容
+    // 可滚动内容
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(""));
 
@@ -95,21 +84,15 @@ pub fn render(frame: &mut Frame, area: Rect) {
         lines.push(Line::from(""));
     }
 
-    lines.push(Line::from(Span::styled(
+    let para = Paragraph::new(lines).scroll((scroll, 0));
+    frame.render_widget(para, content_area);
+
+    // 固定提示（不受滚动影响）
+    let hint = Paragraph::new(Span::styled(
         format!("     {}", t!("help.close")),
         Theme::secondary(),
-    )));
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(Span::styled(
-            format!(" {} ", t!("help.title")),
-            Style::default().add_modifier(Modifier::BOLD),
-        ));
-
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, panel_area);
+    ));
+    frame.render_widget(hint, hint_area);
 }
 
 fn count_lines(sections: &[(&str, Vec<(&str, &str)>)]) -> usize {
@@ -119,6 +102,5 @@ fn count_lines(sections: &[(&str, Vec<(&str, &str)>)]) -> usize {
         n += bindings.len();
         n += 1; // gap
     }
-    n += 1; // close hint
     n
 }

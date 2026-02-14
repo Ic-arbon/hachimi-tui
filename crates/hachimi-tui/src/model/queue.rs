@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::model::song::PublicSongDetail;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MusicQueueItem {
     pub id: i64,
@@ -11,6 +13,37 @@ pub struct MusicQueueItem {
     pub explicit: Option<bool>,
     pub audio_url: String,
     pub gain: Option<f32>,
+}
+
+impl MusicQueueItem {
+    /// 从队列项构造一个基本的歌曲详情（缺少标签、歌词等完整信息）
+    pub fn to_song_detail(&self) -> PublicSongDetail {
+        PublicSongDetail {
+            id: self.id,
+            display_id: self.display_id.clone(),
+            title: self.name.clone(),
+            subtitle: String::new(),
+            description: String::new(),
+            duration_seconds: self.duration_secs,
+            tags: vec![],
+            lyrics: String::new(),
+            audio_url: self.audio_url.clone(),
+            cover_url: self.cover_url.clone(),
+            production_crew: vec![],
+            creation_type: 0,
+            origin_infos: vec![],
+            uploader_uid: 0,
+            uploader_name: self.artist.clone(),
+            play_count: 0,
+            like_count: 0,
+            external_links: vec![],
+            create_time: chrono::Utc::now(),
+            release_time: chrono::Utc::now(),
+            explicit: self.explicit,
+            gain: self.gain,
+            partial: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +95,7 @@ impl QueueState {
         }
     }
 
+    #[allow(dead_code)] // TODO: 插队播放
     pub fn insert_next(&mut self, item: MusicQueueItem) {
         let pos = self.current_index.map_or(0, |i| i + 1);
         self.songs.insert(pos, item);

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Miller Columns 导航层级树中的节点类型
@@ -5,7 +7,6 @@ use serde::{Deserialize, Serialize};
 pub enum NavNode {
     Root,
     Home,
-    Search,
     Library,
     Queue,
     Settings,
@@ -18,17 +19,23 @@ pub enum NavNode {
 
     // Library 子项
     MyPlaylists,
+    #[allow(dead_code)] // TODO: 收藏功能
     Favorites,
     History,
 
     // 动态内容
+    #[allow(dead_code)] // TODO: 歌曲列表页
     SongList { title: String },
+    #[allow(dead_code)] // TODO: 歌曲详情页
     SongDetail { id: i64 },
+    #[allow(dead_code)] // TODO: 标签列表页
     TagList,
     Tag { name: String },
     PlaylistDetail { id: i64 },
     UserDetail { id: i64 },
+    #[allow(dead_code)] // TODO: 搜索结果页
     SearchResults,
+    #[allow(dead_code)] // TODO: 设置页面
     SettingsPage,
 }
 
@@ -37,7 +44,6 @@ impl NavNode {
         match self {
             Self::Root => t!("nav.root"),
             Self::Home => t!("nav.home"),
-            Self::Search => t!("nav.search"),
             Self::Library => t!("nav.library"),
             Self::Queue => t!("nav.queue"),
             Self::Settings => t!("nav.settings"),
@@ -63,7 +69,6 @@ impl NavNode {
         match self {
             Self::Root => vec![
                 Self::Home,
-                Self::Search,
                 Self::Library,
                 Self::Queue,
                 Self::Settings,
@@ -74,7 +79,7 @@ impl NavNode {
                 Self::WeeklyHot,
                 Self::Categories,
             ],
-            Self::Library => vec![Self::MyPlaylists, Self::Favorites, Self::History],
+            Self::Library => vec![Self::MyPlaylists, Self::History],
             _ => vec![],
         }
     }
@@ -91,6 +96,10 @@ impl NavNode {
                 | Self::WeeklyHot
                 | Self::Categories
                 | Self::Tag { .. }
+                | Self::History
+                | Self::MyPlaylists
+                | Self::PlaylistDetail { .. }
+                | Self::UserDetail { .. }
         )
     }
 }
@@ -100,6 +109,8 @@ impl NavNode {
 pub struct NavStack {
     /// 从根到当前的路径
     path: Vec<NavLevel>,
+    /// 退出子级时记忆光标位置，重新进入时恢复
+    cursor_memory: HashMap<NavNode, usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +126,7 @@ impl NavStack {
                 node: NavNode::Root,
                 selected: 0,
             }],
+            cursor_memory: HashMap::new(),
         }
     }
 
@@ -138,23 +150,46 @@ impl NavStack {
         self.path.len()
     }
 
+    #[allow(dead_code)] // TODO: 导航状态判断
     pub fn is_root(&self) -> bool {
         self.path.len() == 1
     }
 
     pub fn push(&mut self, node: NavNode) {
-        self.path.push(NavLevel { node, selected: 0 });
+        let selected = self.cursor_memory.get(&node).copied().unwrap_or(0);
+        self.path.push(NavLevel { node, selected });
     }
 
     pub fn pop(&mut self) -> bool {
         if self.path.len() > 1 {
-            self.path.pop();
+            let level = self.path.pop().unwrap();
+            self.cursor_memory.insert(level.node, level.selected);
             true
         } else {
             false
         }
     }
 
+    /// 检查导航栈中是否包含指定节点
+    pub fn contains(&self, node: &NavNode) -> bool {
+        self.path.iter().any(|l| l.node == *node)
+    }
+
+    /// 回退到栈中已有的 `node`，截断其上方的层级并重置选中索引。
+    /// 返回是否找到并回退成功。
+    pub fn pop_to(&mut self, node: &NavNode) -> bool {
+        if let Some(pos) = self.path.iter().position(|l| l.node == *node) {
+            for level in self.path.drain(pos + 1..) {
+                self.cursor_memory.insert(level.node, level.selected);
+            }
+            self.path[pos].selected = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    #[allow(dead_code)] // TODO: 面包屑导航
     pub fn path(&self) -> &[NavLevel] {
         &self.path
     }
@@ -167,7 +202,6 @@ pub struct SearchState {
     pub search_type: SearchType,
     pub sort: SearchSort,
     pub cursor_pos: usize,
-    pub is_editing: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -229,7 +263,13 @@ impl SearchState {
             search_type: SearchType::default(),
             sort: SearchSort::default(),
             cursor_pos: 0,
-            is_editing: false,
         }
+    }
+
+    /// 清空查询和光标，保留 type/sort 偏好
+    #[allow(dead_code)] // TODO: 搜索重置
+    pub fn clear(&mut self) {
+        self.query.clear();
+        self.cursor_pos = 0;
     }
 }

@@ -49,11 +49,12 @@ impl std::error::Error for CommonError {}
 /// 播放历史
 pub mod play_history {
     use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Serialize};
+    use serde::Deserialize;
 
     use super::song::PublicSongDetail;
 
     #[derive(Debug, Clone, Deserialize)]
+    #[allow(dead_code)] // TODO: 播放历史详情
     pub struct PlayHistoryItem {
         pub id: i64,
         pub song_info: PublicSongDetail,
