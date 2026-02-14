@@ -101,7 +101,9 @@ impl App {
     /// 恢复上次退出时的播放
     pub(crate) fn resume_playback(&mut self) {
         if let Some(song) = self.queue.current_song().cloned() {
+            let pos = self.resume_position_ms;
             self.start_audio_fetch(song.id, &song.name, &song.artist);
+            self.resume_position_ms = pos;
         }
     }
 
@@ -350,6 +352,9 @@ impl App {
     pub(crate) fn toggle_play_pause(&mut self) {
         if self.player.bar.is_playing {
             self.player.engine.pause();
+        } else if self.resume_position_ms.is_some() {
+            // 恢复模式：音频尚未加载，需先获取
+            self.resume_playback();
         } else if self.player.bar.has_song() {
             self.player.engine.resume();
         } else if let Some(song) = self.queue.current_song().cloned() {
@@ -496,6 +501,7 @@ impl App {
 
     /// 异步获取歌曲详情 → 下载音频 → 发送 AudioFetched
     pub(crate) fn start_audio_fetch(&mut self, song_id: i64, title: &str, artist: &str) {
+        self.resume_position_ms = None; // 新歌播放时清除恢复位置
         self.player.bar.is_loading = true;
         self.player.bar.title = title.to_string();
         self.player.bar.artist = artist.to_string();
@@ -887,8 +893,8 @@ impl App {
         };
         if let Some(url) = cover_url {
             if !url.is_empty()
-                && !self.cache.images.contains_key(&url)
                 && !self.cache.images_loading.contains(&url)
+                && (self.player.expanded || !self.cache.images.contains_key(&url))
             {
                 let tx = self.msg_tx.clone();
                 self.cover_debounce = Some(tokio::spawn(async move {

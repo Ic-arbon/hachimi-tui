@@ -150,6 +150,8 @@ pub struct App {
     pub(crate) cover_debounce: Option<tokio::task::JoinHandle<()>>,
     /// 启动时待恢复的播放进度（毫秒），seek 后清零
     pub(crate) resume_position_ms: Option<u64>,
+    /// draw 后待重编码的封面 URL（从 miller 小 rect 切换到 player_view 大 rect）
+    pub(crate) pending_cover_reload: Option<String>,
 }
 
 impl App {
@@ -215,7 +217,7 @@ impl App {
         // 加载或创建播放队列
         let queue = QueueState::load_persisted().unwrap_or_else(|_| QueueState::new());
 
-        let resume_position_ms = if has_auth && queue.current_index.is_some() && queue.position_ms > 0 {
+        let resume_position_ms = if has_auth && queue.current_index.is_some() {
             Some(queue.position_ms)
         } else {
             None
@@ -266,6 +268,7 @@ impl App {
             msg_rx,
             cover_debounce: None,
             resume_position_ms,
+            pending_cover_reload: None,
         })
     }
 
@@ -336,13 +339,27 @@ impl App {
             }
         });
 
-        // 启动时恢复上次播放
+        // 启动时仅恢复播放栏 UI，不自动播放
         if self.resume_position_ms.is_some() {
-            self.resume_playback();
+            if let Some(song) = self.queue.current_song() {
+                self.player.bar.title = song.name.clone();
+                self.player.bar.artist = song.artist.clone();
+                self.player.bar.total_secs = song.duration_secs as u32;
+                self.player.bar.current_secs =
+                    (self.resume_position_ms.unwrap_or(0) / 1000) as u32;
+                self.player.bar.cover_url = song.cover_url.clone();
+            }
         }
 
         while self.running {
             terminal.draw(|f| self.render(f))?;
+
+            // draw 后 last_image_rect 已更新为当前视图的 rect，处理待重编码封面
+            if let Some(url) = self.pending_cover_reload.take() {
+                self.cache.images.remove(&url);
+                self.cache.images_loading.remove(&url);
+                self.start_image_fetch(&url);
+            }
 
             // 等待至少一条消息
             if let Some(msg) = self.msg_rx.recv().await {
