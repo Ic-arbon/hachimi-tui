@@ -500,7 +500,8 @@ impl App {
         self.player.bar.title = title.to_string();
         self.player.bar.artist = artist.to_string();
 
-        // 记录播放历史
+        // 记录播放历史，并使缓存失效以便下次进入时刷新
+        self.cache.songs.remove(&NavNode::History);
         let history_client = self.client.clone();
         tokio::spawn(async move {
             if history_client.is_authenticated().await {
