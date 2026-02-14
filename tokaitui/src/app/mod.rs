@@ -6,15 +6,9 @@ const UI_TICK_MS: u64 = 300;
 const IMAGE_CACHE_CAP: usize = 50;
 
 use std::collections::{HashMap, HashSet};
-use std::io;
 
 use anyhow::Result;
-use crossterm::{
-    event::Event,
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
-use ratatui::{Terminal, backend::CrosstermBackend};
+use crossterm::event::Event;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use tokio::sync::mpsc;
@@ -276,11 +270,7 @@ impl App {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
+        let mut terminal = ratatui::init();
 
         self.cache.picker = Some(
             Picker::from_query_stdio()
@@ -298,16 +288,14 @@ impl App {
         self.cache.image_bytes.clear();
         self.cache.image_order.clear();
 
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
+        ratatui::restore();
 
         result
     }
 
     async fn main_loop(
         &mut self,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        terminal: &mut ratatui::DefaultTerminal,
     ) -> Result<()> {
         // 启动持久的事件读取线程，避免 select! + spawn_blocking 丢事件
         let event_tx = self.msg_tx.clone();

@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem, ListState, Paragraph, Wrap},
@@ -48,17 +48,13 @@ pub fn render(
     let current = nav.current();
 
     if depth <= 1 {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        let cols = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
         render_column(frame, cols[0], &current.node, current.selected, true, data, scroll_tick);
         render_preview_column(frame, cols[1], &current.node, current.selected, data, image_cache, font_size, last_image_rect);
     } else {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
+        let cols = Layout::horizontal([
                 Constraint::Percentage(15),
                 Constraint::Percentage(45),
                 Constraint::Percentage(40),
@@ -465,9 +461,7 @@ fn render_queue_item_detail(
     let (img_area, text_area) = if wants_cover {
         let (img_width, img_height) =
             scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(img_height), Constraint::Min(1)])
+        let chunks = Layout::vertical([Constraint::Length(img_height), Constraint::Min(1)])
             .split(inner);
         let x_offset = inner.width.saturating_sub(img_width) / 2;
         let img_rect = Rect {
@@ -563,9 +557,7 @@ fn render_song_detail(
     let (img_area, text_area) = if wants_cover {
         let (img_width, img_height) =
             scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(img_height), Constraint::Min(1)])
+        let chunks = Layout::vertical([Constraint::Length(img_height), Constraint::Min(1)])
             .split(inner);
         let x_offset = inner.width.saturating_sub(img_width) / 2;
         let img_rect = Rect {
@@ -718,7 +710,7 @@ fn truncate_with_dots(text: &str, max_width: usize) -> String {
     let mut result = String::new();
     let mut width = 0;
     for c in text.chars() {
-        let cw = UnicodeWidthStr::width(c.to_string().as_str());
+        let cw = c.width().unwrap_or(0);
         if width + cw > content_width {
             break;
         }
@@ -743,7 +735,7 @@ fn marquee_text(text: &str, max_width: usize, tick: u16) -> String {
         .chars()
         .scan(0usize, |acc, c| {
             let w = *acc;
-            *acc += UnicodeWidthStr::width(c.to_string().as_str());
+            *acc += c.width().unwrap_or(0);
             Some((c, w))
         })
         .collect();
@@ -768,7 +760,7 @@ fn marquee_text(text: &str, max_width: usize, tick: u16) -> String {
         if w < offset {
             continue;
         }
-        let cw = UnicodeWidthStr::width(c.to_string().as_str());
+        let cw = c.width().unwrap_or(0);
         if width + cw > max_width {
             break;
         }
@@ -854,8 +846,7 @@ fn render_user_preview(
         let max_h = inner.height / 4;
         let half_w = inner.width / 2;
         let (iw, ih) = super::util::square_cells(half_w, max_h, font_size.0, font_size.1);
-        let chunks = Layout::default().direction(Direction::Vertical)
-            .constraints([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
+        let chunks = Layout::vertical([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
         let xo = inner.width.saturating_sub(iw) / 2;
         let r = Rect { x: inner.x + xo, y: chunks[0].y, width: iw, height: ih };
         *last_image_rect = r;
@@ -892,8 +883,7 @@ fn render_playlist_preview(
     let has_cover = wants_cover && image_cache.contains_key(cover_url);
     let (img_area, text_area) = if wants_cover {
         let (iw, ih) = scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
-        let chunks = Layout::default().direction(Direction::Vertical)
-            .constraints([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
+        let chunks = Layout::vertical([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
         let xo = inner.width.saturating_sub(iw) / 2;
         let r = Rect { x: inner.x + xo, y: chunks[0].y, width: iw, height: ih };
         *last_image_rect = r;

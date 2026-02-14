@@ -1,4 +1,4 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -62,9 +62,7 @@ pub fn overlay_panel(
     frame.render_widget(block, panel_area);
 
     // 底部 1 行留给固定提示，其余给可滚动内容
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)])
         .split(inner);
 
     (chunks[0], chunks[1])

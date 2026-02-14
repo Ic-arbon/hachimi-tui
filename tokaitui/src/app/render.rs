@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
@@ -13,9 +13,7 @@ use super::{App, InputMode};
 
 impl App {
     pub(crate) fn render(&mut self, frame: &mut Frame) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        let chunks = Layout::vertical([
                 Constraint::Length(1),
                 Constraint::Min(1),
                 Constraint::Length(1),
@@ -40,9 +38,7 @@ impl App {
                     || self.nav.contains(&NavNode::SearchResults)
                 {
                     // 搜索模式或搜索结果导航中：顶部搜索栏 + 下方 miller
-                    let search_chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([Constraint::Length(1), Constraint::Min(1)])
+                    let search_chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)])
                         .split(chunks[1]);
                     self.render_search_bar(frame, search_chunks[0]);
                     self.render_miller(frame, search_chunks[1]);
@@ -68,10 +64,6 @@ impl App {
 
     fn render_header(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         use ratatui::layout::Alignment;
-        use ratatui::style::{Color, Style};
-        use ratatui::text::{Line, Span};
-        use ratatui::widgets::Paragraph;
-        use unicode_width::UnicodeWidthStr;
 
         let status = if let Some(name) = &self.username {
             Span::styled(
@@ -133,10 +125,7 @@ impl App {
         let right_p = Paragraph::new(Line::from(right_spans))
             .alignment(Alignment::Right);
 
-        use ratatui::layout::{Constraint as C, Direction as D, Layout as L};
-        let cols = L::default()
-            .direction(D::Horizontal)
-            .constraints([C::Min(1), C::Length(right_width)])
+        let cols = Layout::horizontal([Constraint::Min(1), Constraint::Length(right_width)])
             .split(area);
 
         frame.render_widget(left_p, cols[0]);
@@ -216,9 +205,7 @@ impl App {
             Style::default().fg(Color::DarkGray),
         )));
 
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(left_width), Constraint::Length(sort_width)])
+        let cols = Layout::horizontal([Constraint::Length(left_width), Constraint::Length(sort_width)])
             .split(area);
 
         frame.render_widget(left_p, cols[0]);
@@ -230,16 +217,13 @@ impl App {
     }
 
     fn render_settings(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        use ratatui::layout::{Constraint as C, Direction as D, Layout as L};
-        use ratatui::style::{Modifier, Style};
+        use ratatui::style::Modifier;
         use ratatui::widgets::{List, ListItem};
 
-        let cols = L::default()
-            .direction(D::Horizontal)
-            .constraints([
-                C::Percentage(15),
-                C::Percentage(45),
-                C::Percentage(40),
+        let cols = Layout::horizontal([
+                Constraint::Percentage(15),
+                Constraint::Percentage(45),
+                Constraint::Percentage(40),
             ])
             .split(area);
 

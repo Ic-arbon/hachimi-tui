@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
@@ -86,9 +86,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
     let total_height = logo_height + 3 + form_height;
     let v_pad = area.height.saturating_sub(total_height) / 2;
 
-    let v_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let v_layout = Layout::vertical([
             Constraint::Length(v_pad),
             Constraint::Length(logo_height),
             Constraint::Length(3), // logo 与表单间距
@@ -115,9 +113,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
     // 表单水平居中，宽度 44
     let form_width = super::constants::LOGIN_FORM_WIDTH.min(area.width.saturating_sub(4));
     let h_pad = area.width.saturating_sub(form_width) / 2;
-    let h_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
+    let h_layout = Layout::horizontal([
             Constraint::Length(h_pad),
             Constraint::Length(form_width),
             Constraint::Min(0),
@@ -126,9 +122,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &LoginState) {
 
     let form_area = h_layout[1];
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let rows = Layout::vertical([
             Constraint::Length(2), // 标题
             Constraint::Length(1), // Email 标签
             Constraint::Length(1), // Email 输入

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
@@ -39,9 +39,7 @@ pub fn render(
         let max_h = area.height;
         let (cover_width, cover_height) =
             super::util::square_cells(max_w, max_h, fw, fh);
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(col_width), Constraint::Min(1)])
+        let cols = Layout::horizontal([Constraint::Length(col_width), Constraint::Min(1)])
             .split(area);
         // 封面在左栏内水平+垂直居中
         let x_offset = cols[0].width.saturating_sub(cover_width) / 2;

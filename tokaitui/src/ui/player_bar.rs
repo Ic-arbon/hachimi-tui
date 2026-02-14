@@ -1,4 +1,4 @@
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use ratatui::{
     Frame,
@@ -112,7 +112,7 @@ fn truncate_str(s: &str, max: usize) -> String {
     let mut result = String::new();
     let mut w = 0;
     for c in s.chars() {
-        let cw = UnicodeWidthStr::width(c.to_string().as_str());
+        let cw = c.width().unwrap_or(0);
         if w + cw > content_max {
             break;
         }
