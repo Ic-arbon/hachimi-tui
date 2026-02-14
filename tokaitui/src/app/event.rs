@@ -326,7 +326,12 @@ impl App {
                     self.player.engine.seek(std::time::Duration::from_millis(pos_ms));
                     self.player.bar.current_secs = (pos_ms / 1000) as u32;
                 }
-                self.start_image_fetch(&cover_url);
+                // 仅在 last_image_rect 有效时加载封面；startup resume 时 rect 尚为默认值，
+                // fallback 会生成像素正方形，Fit 缩放到非正方形 cell rect 时右边缺一列。
+                // 封面会在用户导航到该歌曲时通过 debounce 路径以正确 hint rect 加载。
+                if self.cache.last_image_rect.width > 0 {
+                    self.start_image_fetch(&cover_url);
+                }
             }
             AppMessage::AudioFetchError(err) => {
                 self.player.bar.is_loading = false;
