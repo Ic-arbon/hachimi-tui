@@ -27,11 +27,6 @@ toml = "0.8"
 # Audio
 rodio = { version = "0.20", default-features = false, features = [
     "symphonia-mp3",
-    "symphonia-aac",
-    "symphonia-flac",
-    "symphonia-vorbis",
-    "symphonia-isomp4",
-    "symphonia-wav",
 ] }
 
 # Utilities
