@@ -18,7 +18,11 @@ tokio = { version = "1", features = ["full"] }
 
 # HTTP
 reqwest = { version = "0.13", default-features = false, features = [
-    "json", "query", "stream", "gzip", "native-tls",
+    "json",
+    "query",
+    "stream",
+    "gzip",
+    "native-tls",
 ] }
 
 # Serialization
@@ -30,6 +34,7 @@ toml = "1.0"
 rodio = { version = "0.21", default-features = false, features = [
     "playback",
     "symphonia-mp3",
+    "symphonia-flac",
 ] }
 
 # Utilities
