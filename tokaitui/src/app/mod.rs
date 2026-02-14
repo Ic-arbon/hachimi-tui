@@ -284,7 +284,7 @@ impl App {
 
         self.cache.picker = Some(
             Picker::from_query_stdio()
-                .unwrap_or_else(|_| Picker::from_fontsize((8, 16)))
+                .unwrap_or_else(|_| Picker::halfblocks())
         );
 
         let result = self.main_loop(&mut terminal).await;

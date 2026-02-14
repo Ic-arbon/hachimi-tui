@@ -8,29 +8,32 @@ edition = "2024"
 
 [workspace.dependencies]
 # TUI
-ratatui = "0.29"
-crossterm = "0.28"
-ratatui-image = { version = "3", default-features = false }
+ratatui = "0.30"
+crossterm = "0.29"
+ratatui-image = { version = "10", default-features = false }
 image = { version = "0.25", default-features = false, features = ["webp"] }
 
 # Async
 tokio = { version = "1", features = ["full"] }
 
 # HTTP
-reqwest = { version = "0.12", features = ["json", "stream", "gzip"] }
+reqwest = { version = "0.13", default-features = false, features = [
+    "json", "query", "stream", "gzip", "native-tls",
+] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.0"
 
 # Audio
-rodio = { version = "0.20", default-features = false, features = [
+rodio = { version = "0.21", default-features = false, features = [
+    "playback",
     "symphonia-mp3",
 ] }
 
 # Utilities
-rand = "0.9"
+rand = "0.10"
 anyhow = "1"
 dirs = "6"
 chrono = { version = "0.4", features = ["serde"] }

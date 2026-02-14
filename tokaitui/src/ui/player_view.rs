@@ -61,7 +61,7 @@ pub fn render(
     // 渲染封面图
     if let Some(img_rect) = cover_area {
         if let Some(protocol) = image_cache.get_mut(&detail.cover_url) {
-            let image = StatefulImage::new(None);
+            let image = StatefulImage::new();
             frame.render_stateful_widget(image, img_rect, protocol);
         }
     }

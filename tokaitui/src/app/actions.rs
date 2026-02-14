@@ -740,11 +740,7 @@ impl App {
             return;
         }
         let Some(ref mut picker) = self.cache.picker else { return };
-        // Picker 是 Copy，直接复制会导致 kitty_counter 不递增，
-        // 所有后台创建的协议拿到相同 ID → 终端无法区分不同图片。
-        // 先用 1×1 空图推进计数器，再复制给后台线程。
-        let _ = picker.new_resize_protocol(image::DynamicImage::new_rgb8(1, 1));
-        let picker = *picker;
+        let picker = picker.clone();
         self.cache.images_loading.insert(url.to_string());
         let tx = self.msg_tx.clone();
         let client = self.client.clone();
@@ -792,14 +788,15 @@ impl App {
                     img.resize_exact(target, target, image::imageops::FilterType::Triangle)
                 };
 
-                let mut picker = picker;
+                let picker = picker;
                 let mut protocol = picker.new_resize_protocol(img);
 
                 // 预编码：使 draw 时 needs_resize 返回 None，避免主线程阻塞
                 if hint_rect.width > 0 && hint_rect.height > 0 {
+                    use ratatui_image::ResizeEncodeRender;
                     let resize = ratatui_image::Resize::Fit(None);
                     if let Some(rect) = protocol.needs_resize(&resize, hint_rect) {
-                        protocol.resize_encode(&resize, None, rect);
+                        protocol.resize_encode(&resize, rect);
                     }
                 }
 

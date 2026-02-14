@@ -33,7 +33,7 @@ impl QueueState {
                 if self.songs.is_empty() {
                     return None;
                 }
-                use rand::Rng;
+                use rand::RngExt;
                 let mut rng = rand::rng();
                 let new_idx = rng.random_range(0..self.songs.len());
                 self.current_index = Some(new_idx);

@@ -2,7 +2,7 @@ use std::io::Cursor;
 use std::time::Duration;
 
 use anyhow::Result;
-use rodio::{Decoder, OutputStream, Sink};
+use rodio::{Decoder, OutputStreamBuilder, Sink};
 use tokio::sync::mpsc;
 
 /// 播放引擎发给 UI 的事件
@@ -88,12 +88,12 @@ fn player_thread(
     mut cmd_rx: mpsc::UnboundedReceiver<PlayerCommand>,
     event_tx: mpsc::UnboundedSender<PlayerEvent>,
 ) {
-    let Ok((_stream, stream_handle)) = OutputStream::try_default() else {
+    let Ok(_stream) = OutputStreamBuilder::open_default_stream() else {
         let _ = event_tx.send(PlayerEvent::Error("无法打开音频输出设备".to_string()));
         return;
     };
 
-    let sink = Sink::try_new(&stream_handle).unwrap();
+    let sink = Sink::connect_new(_stream.mixer());
     sink.pause();
 
     let mut has_source = false;

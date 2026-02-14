@@ -488,7 +488,7 @@ fn render_queue_item_detail(
 
     if let Some(img_rect) = img_area {
         if let Some(protocol) = image_cache.get_mut(&item.cover_url) {
-            let image = StatefulImage::new(None);
+            let image = StatefulImage::new();
             frame.render_stateful_widget(image, img_rect, protocol);
         }
     }
@@ -587,7 +587,7 @@ fn render_song_detail(
     // 渲染封面图
     if let Some(img_rect) = img_area {
         if let Some(protocol) = image_cache.get_mut(&song.cover_url) {
-            let image = StatefulImage::new(None);
+            let image = StatefulImage::new();
             frame.render_stateful_widget(image, img_rect, protocol);
         }
     }
@@ -863,7 +863,7 @@ fn render_user_preview(
     } else { (None, inner) };
     if let Some(r) = img_area {
         if let Some(p) = image_cache.get_mut(avatar_url) {
-            frame.render_stateful_widget(StatefulImage::new(None), r, p);
+            frame.render_stateful_widget(StatefulImage::new(), r, p);
         }
     }
     let mut lines = vec![Line::from(Span::styled(user.username.clone(), Style::default().add_modifier(Modifier::BOLD)))];
@@ -901,7 +901,7 @@ fn render_playlist_preview(
     } else { (None, inner) };
     if let Some(r) = img_area {
         if let Some(p) = image_cache.get_mut(cover_url) {
-            frame.render_stateful_widget(StatefulImage::new(None), r, p);
+            frame.render_stateful_widget(StatefulImage::new(), r, p);
         }
     }
     let mut lines = vec![
