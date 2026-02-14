@@ -29,10 +29,12 @@ pub fn render(
     font_size: (u16, u16),
     last_image_rect: &mut Rect,
 ) {
-    let has_cover = !detail.cover_url.is_empty()
-        && image_cache.contains_key(&detail.cover_url);
+    let wants_cover = !detail.cover_url.is_empty();
+    let has_cover = wants_cover && image_cache.contains_key(&detail.cover_url);
 
-    let (cover_area, info_area) = if has_cover {
+    // 只要有 cover_url 就计算 hint rect 并更新 last_image_rect，
+    // 确保后续 start_image_fetch 使用 player_view 的大尺寸 rect。
+    let (cover_area, info_area) = if wants_cover {
         let (fw, fh) = font_size;
         let col_width = area.width / 2;
         let max_w = col_width * 3 / 4;
@@ -41,7 +43,6 @@ pub fn render(
             super::util::square_cells(max_w, max_h, fw, fh);
         let cols = Layout::horizontal([Constraint::Length(col_width), Constraint::Min(1)])
             .split(area);
-        // 封面在左栏内水平+垂直居中
         let x_offset = cols[0].width.saturating_sub(cover_width) / 2;
         let y_offset = area.height.saturating_sub(cover_height) / 2;
         let img_rect = Rect {
@@ -51,7 +52,12 @@ pub fn render(
             height: cover_height,
         };
         *last_image_rect = img_rect;
-        (Some(img_rect), cols[1])
+        if has_cover {
+            (Some(img_rect), cols[1])
+        } else {
+            // 保持双列布局，避免封面加载时文本区域跳变
+            (None, cols[1])
+        }
     } else {
         (None, area)
     };
