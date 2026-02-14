@@ -19,7 +19,7 @@ use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use tokio::sync::mpsc;
 
-use hachimi_core::HachimiClient;
+use mambocore::MamboClient;
 use crate::config::settings::Settings;
 use crate::model::playlist::{PlaylistItem, PlaylistMetadata};
 use crate::model::queue::QueueState;
@@ -137,7 +137,7 @@ impl DataCache {
 pub struct App {
     pub running: bool,
     pub settings: Settings,
-    pub client: HachimiClient,
+    pub client: MamboClient,
     pub player: PlayerState,
     pub queue: QueueState,
     pub cache: DataCache,
@@ -161,7 +161,7 @@ pub struct App {
 impl App {
     pub async fn new() -> Result<Self> {
         let settings = Settings::load()?;
-        let client = HachimiClient::new(None)?;
+        let client = MamboClient::new(None)?;
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();
 
         // 加载已保存的认证信息，并检查 token 是否过期
@@ -170,10 +170,10 @@ impl App {
             client.set_auth(auth.clone()).await;
             if let Some(event) = client.ensure_valid_auth().await {
                 match event {
-                    hachimi_core::AuthEvent::Refreshed(data) => {
+                    mambocore::AuthEvent::Refreshed(data) => {
                         let _ = crate::config::auth_store::save(&data);
                     }
-                    hachimi_core::AuthEvent::Cleared => {
+                    mambocore::AuthEvent::Cleared => {
                         let _ = crate::config::auth_store::clear();
                     }
                 }

@@ -1,10 +1,10 @@
 [package]
-name = "hachimi-tui"
+name = "tokaitui"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-hachimi-core = { path = "../hachimi-core" }
+mambocore = { path = "../mambocore" }
 ratatui.workspace = true
 crossterm.workspace = true
 ratatui-image.workspace = true

@@ -653,41 +653,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hachimi-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "hachimi-tui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "dirs",
- "hachimi-core",
- "image",
- "open",
- "rand 0.9.2",
- "ratatui",
- "ratatui-image",
- "reqwest",
- "rodio",
- "serde",
- "serde_json",
- "tokio",
- "toml",
- "unicode-width 0.2.0",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1210,6 +1175,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "mambocore"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2360,6 +2337,29 @@ checksum = "42d3e9c45c09de15d06dd8acf5f4e0e399e85927b7f00711024eb7ae10fa4869"
 dependencies = [
  "displaydoc",
  "zerovec",
+]
+
+[[package]]
+name = "tokaitui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "crossterm",
+ "dirs",
+ "image",
+ "mambocore",
+ "open",
+ "rand 0.9.2",
+ "ratatui",
+ "ratatui-image",
+ "reqwest",
+ "rodio",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

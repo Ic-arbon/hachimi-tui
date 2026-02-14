@@ -1,4 +1,4 @@
-use hachimi_core::endpoints::{
+use mambocore::endpoints::{
     HistoryCursorQuery, PageByUserQuery, PlaylistSearchQuery, RecentQuery, SongSearchQuery,
     UserSearchQuery,
 };
@@ -66,7 +66,7 @@ impl App {
                 email,
                 password,
                 code: None,
-                device_info: "hachimi-tui".to_string(),
+                device_info: "tokaitui".to_string(),
                 captcha_key,
             };
 

@@ -1,5 +1,5 @@
 [package]
-name = "hachimi-core"
+name = "mambocore"
 version.workspace = true
 edition.workspace = true
 

@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::client::HachimiClient;
+use crate::client::MamboClient;
 use crate::model::{
     auth::*,
     play_history::*,
@@ -139,7 +139,7 @@ pub struct CheckFavoriteQuery {
     pub playlist_id: i64,
 }
 
-impl HachimiClient {
+impl MamboClient {
     // — 认证 —
 
     pub async fn login(&self, req: &LoginReq) -> Result<LoginResp> {

@@ -3,9 +3,9 @@
 [English](#english) | [中文](#中文)
 
 ```
-░█░█░█▀█░█▀▀░█░█░▀█▀░█▄█░▀█▀
-░█▀█░█▀█░█░░░█▀█░░█░░█░█░░█░
-░▀░▀░▀░▀░▀▀▀░▀░▀░▀▀▀░▀░▀░▀▀▀
+░▀█▀░█▀█░█░█░█▀█░▀█▀░▀█▀░█░█░▀█▀
+░░█░░█░█░█▀▄░█▀█░░█░░░█░░█░█░░█░
+░░▀░░▀▀▀░▀░▀░▀░▀░▀▀▀░░▀░░▀▀▀░▀▀▀
 ```
 
 ---
@@ -52,8 +52,8 @@ Terminal music player for [Hachimi](https://hachimi.world).
 ### Project Structure
 
 ```
-hachimi-core/     API client & data models (reusable library)
-hachimi-tui/      Terminal UI application
+mambocore/     API client & data models (reusable library)
+tokaitui/      Terminal UI application
 ├── src/app/      App state, event loop, actions, rendering dispatch
 ├── src/config/   Settings, auth persistence, paths
 ├── src/model/    Queue model (TUI-specific)
@@ -84,7 +84,7 @@ cargo build --release
 
 ### Configuration
 
-Files are stored in `~/.config/hachimi-tui/`:
+Files are stored in `~/.config/tokaitui/`:
 
 | File | Description |
 |------|-------------|
@@ -136,8 +136,8 @@ Files are stored in `~/.config/hachimi-tui/`:
 ### 项目结构
 
 ```
-hachimi-core/     API 客户端与数据模型（可复用库）
-hachimi-tui/      终端 UI 应用
+mambocore/     API 客户端与数据模型（可复用库）
+tokaitui/      终端 UI 应用
 ├── src/app/      应用状态、事件循环、业务逻辑、渲染分发
 ├── src/config/   配置、认证持久化、路径管理
 ├── src/model/    队列模型（TUI 专用）
@@ -168,7 +168,7 @@ cargo build --release
 
 ### 配置文件
 
-存储在 `~/.config/hachimi-tui/`：
+存储在 `~/.config/tokaitui/`：
 
 | 文件 | 说明 |
 |------|------|

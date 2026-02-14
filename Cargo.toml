@@ -1,5 +1,5 @@
 [workspace]
-members = ["hachimi-core", "hachimi-tui"]
+members = ["mambocore", "tokaitui"]
 resolver = "2"
 
 [workspace.package]

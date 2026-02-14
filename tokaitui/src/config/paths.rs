@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 pub fn config_dir() -> Result<PathBuf> {
     let dir = dirs::config_dir()
         .context("无法获取配置目录")?
-        .join("hachimi-tui");
+        .join("tokaitui");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -14,7 +14,7 @@ pub fn config_dir() -> Result<PathBuf> {
 pub fn cache_dir() -> Result<PathBuf> {
     let dir = dirs::cache_dir()
         .context("无法获取缓存目录")?
-        .join("hachimi-tui");
+        .join("tokaitui");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }

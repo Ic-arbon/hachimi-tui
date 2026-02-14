@@ -18,19 +18,19 @@ pub enum AuthEvent {
 }
 
 #[derive(Clone)]
-pub struct HachimiClient {
+pub struct MamboClient {
     http: reqwest::Client,
     base_url: String,
     auth: Arc<RwLock<Option<AuthData>>>,
 }
 
-impl HachimiClient {
+impl MamboClient {
     pub fn new(base_url: Option<&str>) -> Result<Self> {
         let mut headers = HeaderMap::new();
         headers.insert(REFERER, HeaderValue::from_static("https://hachimi.world/"));
         headers.insert(
             USER_AGENT,
-            HeaderValue::from_static("hachimi-tui/0.1.0"),
+            HeaderValue::from_static("tokaitui/0.1.0"),
         );
 
         let http = reqwest::Client::builder()
@@ -79,7 +79,7 @@ impl HachimiClient {
         let result = self
             .refresh_token(&RefreshTokenReq {
                 refresh_token,
-                device_info: "hachimi-tui".to_string(),
+                device_info: "tokaitui".to_string(),
             })
             .await;
         match result {

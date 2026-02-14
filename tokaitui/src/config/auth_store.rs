@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-pub use hachimi_core::AuthData;
+pub use mambocore::AuthData;
 
 use super::paths;
 
