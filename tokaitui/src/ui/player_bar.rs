@@ -18,6 +18,7 @@ pub struct PlayerBarState {
     pub total_secs: u32,
     pub is_loading: bool,
     pub cover_url: String,
+    pub codec: String,
 }
 
 impl Default for PlayerBarState {
@@ -30,6 +31,7 @@ impl Default for PlayerBarState {
             total_secs: 0,
             is_loading: false,
             cover_url: String::new(),
+            codec: String::new(),
         }
     }
 }
@@ -63,9 +65,14 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PlayerBarState) {
     let progress_bar = build_progress_bar(state.current_secs, state.total_secs, 10);
 
     let song_info = format!("{} - {}", state.title, state.artist);
+    let codec_tag = if state.codec.is_empty() {
+        String::new()
+    } else {
+        format!("[{}] ", state.codec.to_uppercase())
+    };
     let right_part = format!(
-        " {}/{} {} ",
-        time_current, time_total, progress_bar
+        " {}{}/{} {} ",
+        codec_tag, time_current, time_total, progress_bar
     );
 
     let available_width = area.width as usize;

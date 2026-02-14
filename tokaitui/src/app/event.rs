@@ -130,6 +130,21 @@ impl App {
             (_, KeyCode::Char('i')) => {
                 self.player.expanded = true;
                 self.player.follow_playback = self.player.current_detail.is_some();
+                // 确定展开页将显示的封面，标记在 draw 后以大 rect 加载/重编码
+                let url = if self.player.follow_playback {
+                    self.player.current_detail.as_ref().map(|d| d.cover_url.clone())
+                } else {
+                    let node = &self.nav.current().node;
+                    let idx = self.nav.current().selected;
+                    if *node == NavNode::Queue {
+                        self.queue.songs.get(idx).map(|q| q.cover_url.clone())
+                    } else {
+                        self.selected_song().map(|s| s.cover_url.clone())
+                    }
+                };
+                if let Some(url) = url.filter(|u| !u.is_empty()) {
+                    self.pending_cover_reload = Some(url);
+                }
             }
             (_, KeyCode::Char('/')) => {
                 self.search.clear();
@@ -312,6 +327,12 @@ impl App {
                 self.player.bar.current_secs = 0;
                 self.player.bar.is_loading = false;
                 self.player.bar.cover_url = detail.cover_url.clone();
+                self.player.bar.codec = detail
+                    .audio_url
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
                 let duration_secs = detail.duration_seconds as u32;
                 let gain = if self.settings.player.replay_gain {
                     detail.gain
@@ -414,6 +435,11 @@ impl App {
                 self.cache.evict_images_if_needed();
             }
             AppMessage::DebouncedCoverLoad(url) => {
+                // 展开页需要更大的 rect，强制用当前 last_image_rect 重编码
+                if self.player.expanded {
+                    self.cache.images.remove(&url);
+                    self.cache.images_loading.remove(&url);
+                }
                 self.start_image_fetch(&url);
             }
             AppMessage::SongDetailFetched { node, index, detail } => {
