@@ -95,8 +95,9 @@ pub fn square_cells(max_w: u16, max_h: u16, fw: u16, fh: u16) -> (u16, u16) {
     // k = 最大倍率，使 k*step_w <= max_w 且 k*step_h <= max_h
     let k = (max_w / step_w).min(max_h / step_h);
     if k > 0 {
-        return (k * step_w, k * step_h);
+        (k * step_w, k * step_h)
+    } else {
+        // max 空间连一个 step 都放不下，退化为最小像素精确正方形
+        (step_w.max(1), step_h.max(1))
     }
-
-    (step_w.min(max_w).max(1), step_h.min(max_h).max(1))
 }

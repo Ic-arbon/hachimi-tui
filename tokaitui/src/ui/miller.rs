@@ -845,7 +845,7 @@ fn render_user_preview(
     let (img_area, text_area) = if wants_avatar {
         let max_h = inner.height / 4;
         let half_w = inner.width / 2;
-        let (iw, ih) = super::util::square_cells(half_w, max_h, font_size.0, font_size.1);
+        let (iw, ih) = scaled_square(half_w, max_h, font_size.0, font_size.1, 100);
         let chunks = Layout::vertical([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
         let xo = inner.width.saturating_sub(iw) / 2;
         let r = Rect { x: inner.x + xo, y: chunks[0].y, width: iw, height: ih };
