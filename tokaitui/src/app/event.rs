@@ -17,17 +17,23 @@ const SEEK_STEP_SECS: u32 = 5;
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event) {
         if let Event::Key(key) = event {
+            // 无条件拦截 Ctrl+C，任何状态下都可退出
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                self.running = false;
+                return;
+            }
+
             // 帮助浮层打开时，只响应关闭操作
             if self.show_help {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Esc => {
+                match (key.modifiers, key.code) {
+                    (_, KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Esc) => {
                         self.show_help = false;
                         self.help_scroll = 0;
                     }
-                    KeyCode::Char('j') | KeyCode::Down => {
+                    (_, KeyCode::Char('j') | KeyCode::Down) => {
                         self.help_scroll = self.help_scroll.saturating_add(1);
                     }
-                    KeyCode::Char('k') | KeyCode::Up => {
+                    (_, KeyCode::Char('k') | KeyCode::Up) => {
                         self.help_scroll = self.help_scroll.saturating_sub(1);
                     }
                     _ => {}
@@ -37,14 +43,14 @@ impl App {
 
             // 日志浮层打开时，只响应滚动和关闭
             if self.show_logs {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Char('!') | KeyCode::Esc => {
+                match (key.modifiers, key.code) {
+                    (_, KeyCode::Char('q') | KeyCode::Char('!') | KeyCode::Esc) => {
                         self.show_logs = false;
                     }
-                    KeyCode::Char('j') | KeyCode::Down => self.logs.scroll_down(),
-                    KeyCode::Char('k') | KeyCode::Up => self.logs.scroll_up(),
-                    KeyCode::Char('h') | KeyCode::Left => self.logs.scroll_left(),
-                    KeyCode::Char('l') | KeyCode::Right => self.logs.scroll_right(),
+                    (_, KeyCode::Char('j') | KeyCode::Down) => self.logs.scroll_down(),
+                    (_, KeyCode::Char('k') | KeyCode::Up) => self.logs.scroll_up(),
+                    (_, KeyCode::Char('h') | KeyCode::Left) => self.logs.scroll_left(),
+                    (_, KeyCode::Char('l') | KeyCode::Right) => self.logs.scroll_right(),
                     _ => {}
                 }
                 return;
@@ -147,8 +153,10 @@ impl App {
                 }
             }
             (_, KeyCode::Char('/')) => {
-                self.search.clear();
-                self.input_mode = InputMode::Search;
+                if self.nav.current().node != NavNode::Settings {
+                    self.search.clear();
+                    self.input_mode = InputMode::Search;
+                }
             }
             (_, KeyCode::Tab) => {
                 if self.nav.contains(&NavNode::SearchResults) {
@@ -267,6 +275,9 @@ impl App {
 
     fn handle_login_captcha_key(&mut self, key: KeyEvent) {
         match (key.modifiers, key.code) {
+            (_, KeyCode::Char('q')) => {
+                self.running = false;
+            }
             (_, KeyCode::Esc) => {
                 self.login.step = LoginStep::Input;
                 self.login.captcha_key = None;
