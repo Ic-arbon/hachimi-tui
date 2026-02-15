@@ -64,7 +64,7 @@ tokaitui/      Terminal UI application
 ### Tech Stack
 
 - **UI**: ratatui + crossterm + ratatui-image
-- **Audio**: rodio (MP3, AAC, FLAC, Vorbis, WAV)
+- **Audio**: rodio (MP3, FLAC)
 - **HTTP**: reqwest
 - **Async**: tokio
 - **Edition**: Rust 2024
@@ -148,7 +148,7 @@ tokaitui/      终端 UI 应用
 ### 技术栈
 
 - **UI**: ratatui + crossterm + ratatui-image
-- **音频**: rodio（MP3、AAC、FLAC、Vorbis、WAV）
+- **音频**: rodio（MP3、FLAC）
 - **HTTP**: reqwest
 - **异步**: tokio
 - **Edition**: Rust 2024
