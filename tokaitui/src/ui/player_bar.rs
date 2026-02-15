@@ -54,9 +54,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PlayerBarState) {
     let status_icon = if state.is_loading {
         "◌"
     } else if state.is_playing {
-        "▶"
-    } else {
         "⏸"
+    } else {
+        "▶"
     };
 
     let time_current = format_time(state.current_secs);
