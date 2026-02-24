@@ -808,7 +808,14 @@ impl App {
         if !self.kitty_supported {
             return;
         }
-        if let Some(url) = self.current_preview_cover_url() {
+        // 展开页跟随播放时，优先取正在播放歌曲的封面
+        let url = if self.player.expanded && self.player.follow_playback {
+            self.player.current_detail.as_ref().map(|d| d.cover_url.clone())
+                .or_else(|| self.current_preview_cover_url())
+        } else {
+            self.current_preview_cover_url()
+        };
+        if let Some(url) = url {
             if !url.is_empty()
                 && !self.cache.covers.is_ready(&url)
                 && !self.cache.covers.is_loading(&url)

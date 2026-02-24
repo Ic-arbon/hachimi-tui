@@ -144,6 +144,7 @@ impl App {
             (_, KeyCode::Char('i')) => {
                 self.player.expanded = true;
                 self.player.follow_playback = self.player.current_detail.is_some();
+                self.schedule_cover_load();
             }
             (_, KeyCode::Char('/')) => {
                 if self.nav.current().node != NavNode::Settings {
@@ -354,6 +355,7 @@ impl App {
                 self.player.parsed_lyrics = crate::ui::lyrics::parse(&detail.lyrics);
                 self.player.current_detail = Some(detail);
                 self.player.engine.play(AudioSource::Buffered(data), duration_secs, gain);
+                self.schedule_cover_load();
                 if let Some(pos_ms) = self.resume_position_ms.take() {
                     self.player.engine.seek(std::time::Duration::from_millis(pos_ms));
                     self.player.bar.current_secs = (pos_ms / 1000) as u32;
