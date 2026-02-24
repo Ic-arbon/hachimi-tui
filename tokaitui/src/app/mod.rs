@@ -91,6 +91,86 @@ pub struct PlayerState {
     pub follow_playback: bool,
 }
 
+/// 已上传到终端的封面条目
+struct CoverEntry {
+    id: u32,
+    upload_seq: Vec<u8>,
+}
+
+/// 封面图片缓存：统一管理 URL→ID 映射、上传序列、加载状态
+pub struct CoverCache {
+    /// 完整条目（含上传序列，供缩放后重传）
+    entries: HashMap<String, CoverEntry>,
+    /// URL → image ID，借给渲染层（与 entries 保持同步）
+    ids: HashMap<String, u32>,
+    /// 正在下载的 URL
+    loading: HashSet<String>,
+    next_id: u32,
+}
+
+impl CoverCache {
+    fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            ids: HashMap::new(),
+            loading: HashSet::new(),
+            next_id: 1,
+        }
+    }
+
+    /// 封面是否已上传就绪
+    pub fn is_ready(&self, url: &str) -> bool {
+        self.entries.contains_key(url)
+    }
+
+    /// 封面是否正在下载
+    pub fn is_loading(&self, url: &str) -> bool {
+        self.loading.contains(url)
+    }
+
+    /// 已缓存封面数
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// 分配新 image ID
+    pub fn alloc_id(&mut self) -> u32 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// 标记 URL 正在下载
+    pub fn mark_loading(&mut self, url: String) {
+        self.loading.insert(url);
+    }
+
+    /// 封面就绪，记录 ID 和上传序列
+    pub fn mark_loaded(&mut self, url: String, id: u32, upload_seq: Vec<u8>) {
+        self.loading.remove(&url);
+        self.ids.insert(url.clone(), id);
+        self.entries.insert(url, CoverEntry { id, upload_seq });
+    }
+
+    /// 淘汰任意一条旧记录，返回 (url, image_id)
+    pub fn evict_one(&mut self) -> Option<(String, u32)> {
+        let url = self.entries.keys().next()?.to_owned();
+        let entry = self.entries.remove(&url)?;
+        self.ids.remove(&url);
+        Some((url, entry.id))
+    }
+
+    /// 所有已上传序列（供终端缩放后重传）
+    pub fn all_upload_seqs(&self) -> impl Iterator<Item = &[u8]> {
+        self.entries.values().map(|e| e.upload_seq.as_slice())
+    }
+
+    /// URL → image ID 映射，供渲染层借用
+    pub fn id_map(&self) -> &HashMap<String, u32> {
+        &self.ids
+    }
+}
+
 pub struct DataCache {
     pub songs: HashMap<NavNode, Vec<PublicSongDetail>>,
     pub tags: Option<Vec<String>>,
@@ -102,14 +182,7 @@ pub struct DataCache {
     pub(crate) detail_loading: HashSet<i64>,
     /// 队列项的完整歌曲详情缓存（按歌曲 ID）
     pub(crate) queue_song_detail: HashMap<i64, PublicSongDetail>,
-    /// URL → Kitty image ID（已上传到终端）
-    pub covers: HashMap<String, u32>,
-    /// URL → 上传序列（a=t APC bytes），用于终端缩放后重新上传
-    pub cover_upload_seqs: HashMap<String, Vec<u8>>,
-    /// 正在下载的封面 URL
-    pub covers_loading: HashSet<String>,
-    /// 下一个可用的 Kitty image ID（从 1 开始）
-    pub next_cover_id: u32,
+    pub covers: CoverCache,
 }
 
 pub struct App {
@@ -239,10 +312,7 @@ impl App {
                 loading: HashSet::new(),
                 detail_loading: HashSet::new(),
                 queue_song_detail: HashMap::new(),
-                covers: HashMap::new(),
-                cover_upload_seqs: HashMap::new(),
-                covers_loading: HashSet::new(),
-                next_cover_id: 1,
+                covers: CoverCache::new(),
             },
             login: LoginState::new(),
             show_help: false,

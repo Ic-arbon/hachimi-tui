@@ -144,7 +144,7 @@ impl App {
             search_type: self.search.search_type,
             search_users: &self.cache.search_users,
             search_playlists: &self.cache.search_playlists,
-            covers: &self.cache.covers,
+            covers: self.cache.covers.id_map(),
         };
         crate::ui::miller::render(
             frame,
@@ -232,7 +232,7 @@ impl App {
 
         // 终端缩放后 image data 被清除，需先重新上传再放置
         if self.needs_cover_reupload {
-            for seq in self.cache.cover_upload_seqs.values() {
+            for seq in self.cache.covers.all_upload_seqs() {
                 out.write_all(seq)?;
             }
             self.needs_cover_reupload = false;
@@ -359,7 +359,7 @@ impl App {
             area,
             &detail,
             playback,
-            &self.cache.covers,
+            self.cache.covers.id_map(),
         );
     }
 }

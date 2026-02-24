@@ -444,9 +444,7 @@ impl App {
                 use std::io::Write;
                 let _ = std::io::stdout().write_all(&upload_seq);
                 let _ = std::io::stdout().flush();
-                self.cache.covers_loading.remove(&url);
-                self.cache.covers.insert(url.clone(), id);
-                self.cache.cover_upload_seqs.insert(url, upload_seq);
+                self.cache.covers.mark_loaded(url, id, upload_seq);
             }
         }
     }

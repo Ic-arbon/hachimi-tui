@@ -803,12 +803,16 @@ impl App {
     }
 
     /// 记录待加载封面（防抖：实际加载在 PlayerTick 中延迟触发）
+    /// 若封面已就绪或正在下载则跳过。
     pub(crate) fn schedule_cover_load(&mut self) {
         if !self.kitty_supported {
             return;
         }
         if let Some(url) = self.current_preview_cover_url() {
-            if !url.is_empty() {
+            if !url.is_empty()
+                && !self.cache.covers.is_ready(&url)
+                && !self.cache.covers.is_loading(&url)
+            {
                 self.pending_cover_load = Some((url, std::time::Instant::now()));
             }
         }
@@ -819,28 +823,22 @@ impl App {
         if !self.kitty_supported {
             return;
         }
-        if self.cache.covers.contains_key(&url) {
-            return;
-        }
-        if self.cache.covers_loading.contains(&url) {
+        if self.cache.covers.is_ready(&url) || self.cache.covers.is_loading(&url) {
             return;
         }
 
         // 超过 10 张时淘汰最旧的一张
         if self.cache.covers.len() >= 10 {
-            if let Some((old_url, old_id)) = self.cache.covers.iter().next().map(|(k, v)| (k.clone(), *v)) {
+            if let Some((_, old_id)) = self.cache.covers.evict_one() {
                 use std::io::Write;
                 let seq = crate::ui::kitty::delete_image(old_id);
                 let _ = std::io::stdout().write_all(&seq);
                 let _ = std::io::stdout().flush();
-                self.cache.covers.remove(&old_url);
-                self.cache.cover_upload_seqs.remove(&old_url);
             }
         }
 
-        let id = self.cache.next_cover_id;
-        self.cache.next_cover_id += 1;
-        self.cache.covers_loading.insert(url.clone());
+        let id = self.cache.covers.alloc_id();
+        self.cache.covers.mark_loading(url.clone());
 
         let tx = self.msg_tx.clone();
         let url_clone = url.clone();
