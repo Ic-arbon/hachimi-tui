@@ -10,8 +10,6 @@ edition = "2024"
 # TUI
 ratatui = "0.30"
 crossterm = "0.29"
-ratatui-image = { version = "10", default-features = false }
-image = { version = "0.25", default-features = false, features = ["webp"] }
 
 # Async
 tokio = { version = "1", features = ["full"] }

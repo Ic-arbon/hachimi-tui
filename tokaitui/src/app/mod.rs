@@ -3,14 +3,11 @@ mod event;
 mod render;
 
 const UI_TICK_MS: u64 = 300;
-const IMAGE_CACHE_CAP: usize = 50;
 
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use crossterm::event::Event;
-use ratatui_image::picker::Picker;
-use ratatui_image::protocol::StatefulProtocol;
 use tokio::sync::mpsc;
 
 use mambocore::MamboClient;
@@ -41,8 +38,6 @@ pub enum AppMessage {
     },
     /// 音频下载失败
     AudioFetchError(String),
-    /// 封面图处理完成（已 resize + 生成协议数据）
-    ImageFetched { url: String, protocol: StatefulProtocol, raw_bytes: Vec<u8> },
     /// API 数据加载完成
     DataLoaded(DataPayload),
     /// 错误通知
@@ -57,8 +52,6 @@ pub enum AppMessage {
         index: usize,
         detail: PublicSongDetail,
     },
-    /// 防抖后触发封面加载
-    DebouncedCoverLoad(String),
 }
 
 /// 后台加载的数据
@@ -99,33 +92,10 @@ pub struct DataCache {
     pub search_users: Vec<PublicUserProfile>,
     pub search_playlists: Vec<PlaylistMetadata>,
     pub loading: HashSet<NavNode>,
-    pub images: HashMap<String, StatefulProtocol>,
-    /// 已下载的原始图片字节（压缩格式），cover_scale 变化时可免重下载
-    pub(crate) image_bytes: HashMap<String, Vec<u8>>,
-    pub(crate) images_loading: HashSet<String>,
-    pub picker: Option<Picker>,
     /// 正在补全详情的歌曲 ID
     pub(crate) detail_loading: HashSet<i64>,
     /// 队列项的完整歌曲详情缓存（按歌曲 ID）
     pub(crate) queue_song_detail: HashMap<i64, PublicSongDetail>,
-    /// 最近一次渲染时图片 widget 的区域，用于后台预编码
-    pub(crate) last_image_rect: ratatui::layout::Rect,
-    /// image_bytes 的插入顺序，用于 FIFO 淘汰
-    pub(crate) image_order: Vec<String>,
-}
-
-impl DataCache {
-    pub(crate) fn evict_images_if_needed(&mut self) {
-        if self.image_order.len() <= IMAGE_CACHE_CAP {
-            return;
-        }
-        let half = self.image_order.len() / 2;
-        let to_remove: Vec<String> = self.image_order.drain(..half).collect();
-        for key in &to_remove {
-            self.images.remove(key);
-            self.image_bytes.remove(key);
-        }
-    }
 }
 
 pub struct App {
@@ -147,11 +117,8 @@ pub struct App {
     pub scroll_tick: u16,
     pub msg_tx: mpsc::UnboundedSender<AppMessage>,
     msg_rx: mpsc::UnboundedReceiver<AppMessage>,
-    pub(crate) cover_debounce: Option<tokio::task::JoinHandle<()>>,
     /// 启动时待恢复的播放进度（毫秒），seek 后清零
     pub(crate) resume_position_ms: Option<u64>,
-    /// draw 后待重编码的封面 URL（从 miller 小 rect 切换到 player_view 大 rect）
-    pub(crate) pending_cover_reload: Option<String>,
 }
 
 impl App {
@@ -248,14 +215,8 @@ impl App {
                 search_users: Vec::new(),
                 search_playlists: Vec::new(),
                 loading: HashSet::new(),
-                images: HashMap::new(),
-                image_bytes: HashMap::new(),
-                images_loading: HashSet::new(),
-                picker: None,
                 detail_loading: HashSet::new(),
                 queue_song_detail: HashMap::new(),
-                last_image_rect: ratatui::layout::Rect::default(),
-                image_order: Vec::new(),
             },
             login: LoginState::new(),
             show_help: false,
@@ -266,30 +227,18 @@ impl App {
             scroll_tick: 0,
             msg_tx,
             msg_rx,
-            cover_debounce: None,
             resume_position_ms,
-            pending_cover_reload: None,
         })
     }
 
     pub async fn run(&mut self) -> Result<()> {
         let mut terminal = ratatui::init();
 
-        self.cache.picker = Some(
-            Picker::from_query_stdio()
-                .unwrap_or_else(|_| Picker::halfblocks())
-        );
-
         let result = self.main_loop(&mut terminal).await;
 
         // 退出时同步进度并持久化队列
         self.queue.position_ms = (self.player.bar.current_secs as u64) * 1000;
         let _ = self.queue.persist();
-
-        // 显式释放图片缓存
-        self.cache.images.clear();
-        self.cache.image_bytes.clear();
-        self.cache.image_order.clear();
 
         ratatui::restore();
 
@@ -353,13 +302,6 @@ impl App {
 
         while self.running {
             terminal.draw(|f| self.render(f))?;
-
-            // draw 后 last_image_rect 已更新为当前视图的 rect，处理待重编码封面
-            if let Some(url) = self.pending_cover_reload.take() {
-                self.cache.images.remove(&url);
-                self.cache.images_loading.remove(&url);
-                self.start_image_fetch(&url);
-            }
 
             // 等待至少一条消息
             if let Some(msg) = self.msg_rx.recv().await {

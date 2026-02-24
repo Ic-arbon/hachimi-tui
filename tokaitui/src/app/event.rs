@@ -136,21 +136,6 @@ impl App {
             (_, KeyCode::Char('i')) => {
                 self.player.expanded = true;
                 self.player.follow_playback = self.player.current_detail.is_some();
-                // 确定展开页将显示的封面，标记在 draw 后以大 rect 加载/重编码
-                let url = if self.player.follow_playback {
-                    self.player.current_detail.as_ref().map(|d| d.cover_url.clone())
-                } else {
-                    let node = &self.nav.current().node;
-                    let idx = self.nav.current().selected;
-                    if *node == NavNode::Queue {
-                        self.queue.songs.get(idx).map(|q| q.cover_url.clone())
-                    } else {
-                        self.selected_song().map(|s| s.cover_url.clone())
-                    }
-                };
-                if let Some(url) = url.filter(|u| !u.is_empty()) {
-                    self.pending_cover_reload = Some(url);
-                }
             }
             (_, KeyCode::Char('/')) => {
                 if self.nav.current().node != NavNode::Settings {
@@ -350,19 +335,12 @@ impl App {
                 } else {
                     None
                 };
-                let cover_url = detail.cover_url.clone();
                 self.player.parsed_lyrics = crate::ui::lyrics::parse(&detail.lyrics);
                 self.player.current_detail = Some(detail);
                 self.player.engine.play(AudioSource::Buffered(data), duration_secs, gain);
                 if let Some(pos_ms) = self.resume_position_ms.take() {
                     self.player.engine.seek(std::time::Duration::from_millis(pos_ms));
                     self.player.bar.current_secs = (pos_ms / 1000) as u32;
-                }
-                // 仅在 last_image_rect 有效时加载封面；startup resume 时 rect 尚为默认值，
-                // fallback 会生成像素正方形，Fit 缩放到非正方形 cell rect 时右边缺一列。
-                // 封面会在用户导航到该歌曲时通过 debounce 路径以正确 hint rect 加载。
-                if self.cache.last_image_rect.width > 0 {
-                    self.start_image_fetch(&cover_url);
                 }
             }
             AppMessage::AudioFetchError(err) => {
@@ -437,21 +415,6 @@ impl App {
                         self.login.captcha_key = None;
                     }
                 }
-            }
-            AppMessage::ImageFetched { url, protocol, raw_bytes } => {
-                self.cache.images_loading.remove(&url);
-                self.cache.image_bytes.insert(url.clone(), raw_bytes);
-                self.cache.images.insert(url.clone(), protocol);
-                self.cache.image_order.push(url);
-                self.cache.evict_images_if_needed();
-            }
-            AppMessage::DebouncedCoverLoad(url) => {
-                // 展开页需要更大的 rect，强制用当前 last_image_rect 重编码
-                if self.player.expanded {
-                    self.cache.images.remove(&url);
-                    self.cache.images_loading.remove(&url);
-                }
-                self.start_image_fetch(&url);
             }
             AppMessage::SongDetailFetched { node, index, detail } => {
                 self.cache.detail_loading.remove(&detail.id);

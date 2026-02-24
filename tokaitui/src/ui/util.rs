@@ -68,36 +68,3 @@ pub fn overlay_panel(
     (chunks[0], chunks[1])
 }
 
-/// 最大公约数
-pub fn gcd(a: u16, b: u16) -> u16 {
-    let (mut a, mut b) = (a, b);
-    while b != 0 {
-        let t = b;
-        b = a % b;
-        a = t;
-    }
-    a
-}
-
-/// 计算像素精确对齐的视觉正方形 cell 尺寸。
-///
-/// 返回 `(w, h)` 满足 `w * fw == h * fh`（像素精确正方形），
-/// 且 `w <= max_w`, `h <= max_h`。
-///
-/// 原理同 actions.rs 中源图 LCM 对齐：ratatui-image `Resize::Fit` 在 cell 空间
-/// 用 `min(wratio, hratio)` 缩放；只要 `w*fw != h*fh`，fitted rect 就小于 area，
-/// Kitty render 留下空 cell（黑边）。GCD 步进保证精确相等，消除黑边。
-pub fn square_cells(max_w: u16, max_h: u16, fw: u16, fh: u16) -> (u16, u16) {
-    let g = gcd(fw, fh);
-    let step_w = fh / g; // width 步进
-    let step_h = fw / g; // height 步进
-
-    // k = 最大倍率，使 k*step_w <= max_w 且 k*step_h <= max_h
-    let k = (max_w / step_w).min(max_h / step_h);
-    if k > 0 {
-        (k * step_w, k * step_h)
-    } else {
-        // max 空间连一个 step 都放不下，退化为最小像素精确正方形
-        (step_w.max(1), step_h.max(1))
-    }
-}

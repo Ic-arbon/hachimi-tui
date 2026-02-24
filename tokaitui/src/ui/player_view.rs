@@ -1,13 +1,10 @@
-use std::collections::HashMap;
-
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
 };
-use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
 use super::lyrics::ParsedLyrics;
 use super::theme::Theme;
@@ -25,53 +22,9 @@ pub fn render(
     area: Rect,
     detail: &PublicSongDetail,
     playback: Option<PlaybackInfo<'_>>,
-    image_cache: &mut HashMap<String, StatefulProtocol>,
-    font_size: (u16, u16),
-    last_image_rect: &mut Rect,
 ) {
-    let wants_cover = !detail.cover_url.is_empty();
-    let has_cover = wants_cover && image_cache.contains_key(&detail.cover_url);
-
-    // 只要有 cover_url 就计算 hint rect 并更新 last_image_rect，
-    // 确保后续 start_image_fetch 使用 player_view 的大尺寸 rect。
-    let (cover_area, info_area) = if wants_cover {
-        let (fw, fh) = font_size;
-        let col_width = area.width / 2;
-        let max_w = col_width * 3 / 4;
-        let max_h = area.height;
-        let (cover_width, cover_height) =
-            super::util::square_cells(max_w, max_h, fw, fh);
-        let cols = Layout::horizontal([Constraint::Length(col_width), Constraint::Min(1)])
-            .split(area);
-        let x_offset = cols[0].width.saturating_sub(cover_width) / 2;
-        let y_offset = area.height.saturating_sub(cover_height) / 2;
-        let img_rect = Rect {
-            x: cols[0].x + x_offset,
-            y: cols[0].y + y_offset,
-            width: cover_width,
-            height: cover_height,
-        };
-        *last_image_rect = img_rect;
-        if has_cover {
-            (Some(img_rect), cols[1])
-        } else {
-            // 保持双列布局，避免封面加载时文本区域跳变
-            (None, cols[1])
-        }
-    } else {
-        (None, area)
-    };
-
-    // 渲染封面图
-    if let Some(img_rect) = cover_area {
-        if let Some(protocol) = image_cache.get_mut(&detail.cover_url) {
-            let image = StatefulImage::new();
-            frame.render_stateful_widget(image, img_rect, protocol);
-        }
-    }
-
-    // 右侧内容区
-    let padded = super::util::padded_rect(info_area, 2);
+    // 右侧内容区（暂无封面，图片系统重构中）
+    let padded = super::util::padded_rect(area, 2);
     let inner = Rect {
         y: padded.y + 1,
         height: padded.height.saturating_sub(1),

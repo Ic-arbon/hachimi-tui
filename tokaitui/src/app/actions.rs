@@ -10,10 +10,8 @@ use crate::ui::navigation::{NavNode, SearchSort, SearchType};
 
 use super::{App, AppMessage, DataPayload, InputMode};
 
-const COVER_DEBOUNCE_MS: u64 = 150;
 const SEARCH_PAGE_SIZE: i32 = 30;
 const HISTORY_PAGE_SIZE: i32 = 50;
-const IMAGE_RESIZE_BASE: u32 = 1200;
 
 impl App {
     // — 认证 —
@@ -88,9 +86,6 @@ impl App {
         self.username = None;
         self.cache.songs.clear();
         self.cache.loading.clear();
-        self.cache.images.clear();
-        self.cache.image_bytes.clear();
-        self.cache.image_order.clear();
         self.cache.tags = None;
         self.cache.playlists = None;
         self.cache.queue_song_detail.clear();
@@ -587,7 +582,6 @@ impl App {
         self.maybe_load_preview_data();
         self.maybe_fetch_song_detail();
         self.maybe_fetch_queue_detail();
-        self.maybe_load_cover_image();
     }
 
     /// 用户手动改变选中项后的共享后处理
@@ -658,9 +652,7 @@ impl App {
         if node == NavNode::Settings {
             crate::ui::settings_view::cycle_setting(&mut self.settings, sel);
             if sel == 3 {
-                // cover_scale 变化，清除协议缓存（保留原始字节），触发从缓存字节重新处理
-                self.cache.images.clear();
-                self.maybe_load_cover_image();
+                // cover_scale 变化
             }
             let _ = self.settings.save();
             return;
@@ -739,82 +731,6 @@ impl App {
         self.on_selection_changed();
     }
 
-    // — 图片加载 —
-
-    pub(crate) fn start_image_fetch(&mut self, url: &str) {
-        if url.is_empty() || self.cache.images.contains_key(url) || self.cache.images_loading.contains(url) {
-            return;
-        }
-        let Some(ref mut picker) = self.cache.picker else { return };
-        let picker = picker.clone();
-        self.cache.images_loading.insert(url.to_string());
-        let tx = self.msg_tx.clone();
-        let client = self.client.clone();
-        let url = url.to_string();
-        let hint_rect = self.cache.last_image_rect;
-        // 优先从已缓存的压缩字节读取，跳过网络下载
-        let cached_bytes = self.cache.image_bytes.get(&url).cloned();
-
-        tokio::spawn(async move {
-            let data = if let Some(bytes) = cached_bytes {
-                bytes
-            } else {
-                let resp = match client.get_audio_stream(&url).await {
-                    Ok(r) if r.status().is_success() => r,
-                    _ => return,
-                };
-                match resp.bytes().await {
-                    Ok(b) => b.to_vec(),
-                    _ => return,
-                }
-            };
-            // 解码 + 裁剪 + resize + protocol 编码全部在 blocking 线程
-            let raw_bytes = data.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                let img = image::load_from_memory(&data).ok()?;
-                let min_side = img.width().min(img.height());
-                let x = (img.width() - min_side) / 2;
-                let y = (img.height() - min_side) / 2;
-                let img = img.crop_imm(x, y, min_side, min_side);
-
-                let (fw, fh) = picker.font_size();
-
-                // 将正方形源图缩放到 hint_rect 的精确像素尺寸（cover/fill）。
-                // 这样 Fit 模式发现图已是正确大小，不 resize → 无黑边。
-                // hint_rect 无效时回退到 LCM 对齐正方形。
-                let img = if hint_rect.width > 0 && hint_rect.height > 0 {
-                    let tw = hint_rect.width as u32 * fw as u32;
-                    let th = hint_rect.height as u32 * fh as u32;
-                    img.resize_to_fill(tw, th, image::imageops::FilterType::Triangle)
-                } else {
-                    let g = crate::ui::util::gcd(fw, fh);
-                    let lcm = (fw / g) as u32 * fh as u32;
-                    let n = (IMAGE_RESIZE_BASE / lcm).max(1);
-                    let target = n * lcm;
-                    img.resize_exact(target, target, image::imageops::FilterType::Triangle)
-                };
-
-                let picker = picker;
-                let mut protocol = picker.new_resize_protocol(img);
-
-                // 预编码：使 draw 时 needs_resize 返回 None，避免主线程阻塞
-                if hint_rect.width > 0 && hint_rect.height > 0 {
-                    use ratatui_image::ResizeEncodeRender;
-                    let resize = ratatui_image::Resize::Fit(None);
-                    if let Some(rect) = protocol.needs_resize(&resize, hint_rect) {
-                        protocol.resize_encode(&resize, rect);
-                    }
-                }
-
-                Some(protocol)
-            })
-            .await;
-            if let Ok(Some(protocol)) = result {
-                let _ = tx.send(AppMessage::ImageFetched { url, protocol, raw_bytes });
-            }
-        });
-    }
-
     /// 预览选中歌曲时，若为搜索结果（partial），异步补全完整详情
     pub(crate) fn maybe_fetch_song_detail(&mut self) {
         let node = self.nav.current().node.clone();
@@ -872,36 +788,4 @@ impl App {
         }
     }
 
-    /// 防抖加载预览封面：取消旧定时器，停下 150ms 后才真正发起请求
-    pub(crate) fn maybe_load_cover_image(&mut self) {
-        // 取消上一次未触发的防抖
-        if let Some(h) = self.cover_debounce.take() {
-            h.abort();
-        }
-        let node = &self.nav.current().node;
-        let idx = self.nav.current().selected;
-        let cover_url = if *node == NavNode::Queue {
-            self.queue.songs.get(idx).map(|q| q.cover_url.clone())
-        } else if *node == NavNode::SearchResults {
-            match self.search.search_type {
-                SearchType::Song => self.selected_song().map(|s| s.cover_url.clone()),
-                SearchType::User => self.cache.search_users.get(idx).and_then(|u| u.avatar_url.clone()),
-                SearchType::Playlist => self.cache.search_playlists.get(idx).and_then(|p| p.cover_url.clone()),
-            }
-        } else {
-            self.selected_song().map(|s| s.cover_url.clone())
-        };
-        if let Some(url) = cover_url {
-            if !url.is_empty()
-                && !self.cache.images_loading.contains(&url)
-                && (self.player.expanded || !self.cache.images.contains_key(&url))
-            {
-                let tx = self.msg_tx.clone();
-                self.cover_debounce = Some(tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(COVER_DEBOUNCE_MS)).await;
-                    let _ = tx.send(AppMessage::DebouncedCoverLoad(url));
-                }));
-            }
-        }
-    }
 }

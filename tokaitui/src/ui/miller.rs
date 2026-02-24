@@ -9,7 +9,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{List, ListItem, ListState, Paragraph, Wrap},
 };
-use ratatui_image::{StatefulImage, protocol::StatefulProtocol};
 
 use super::navigation::{NavNode, NavStack, SearchType};
 use super::theme::Theme;
@@ -40,9 +39,6 @@ pub fn render(
     nav: &NavStack,
     data: &ColumnData,
     scroll_tick: u16,
-    image_cache: &mut HashMap<String, StatefulProtocol>,
-    font_size: (u16, u16),
-    last_image_rect: &mut Rect,
 ) {
     let depth = nav.depth();
     let current = nav.current();
@@ -52,7 +48,7 @@ pub fn render(
             .split(area);
 
         render_column(frame, cols[0], &current.node, current.selected, true, data, scroll_tick);
-        render_preview_column(frame, cols[1], &current.node, current.selected, data, image_cache, font_size, last_image_rect);
+        render_preview_column(frame, cols[1], &current.node, current.selected, data);
     } else {
         let cols = Layout::horizontal([
                 Constraint::Percentage(15),
@@ -66,7 +62,7 @@ pub fn render(
         }
 
         render_column(frame, cols[1], &current.node, current.selected, true, data, scroll_tick);
-        render_preview_column(frame, cols[2], &current.node, current.selected, data, image_cache, font_size, last_image_rect);
+        render_preview_column(frame, cols[2], &current.node, current.selected, data);
     }
 }
 
@@ -297,9 +293,6 @@ fn render_preview_column(
     parent_node: &NavNode,
     selected: usize,
     data: &ColumnData,
-    image_cache: &mut HashMap<String, StatefulProtocol>,
-    font_size: (u16, u16),
-    last_image_rect: &mut Rect,
 ) {
     if parent_node.has_static_children() {
         let children = parent_node.children();
@@ -399,47 +392,34 @@ fn render_preview_column(
     } else if *parent_node == NavNode::Queue {
         if let Some(item) = data.queue.songs.get(selected) {
             if let Some(detail) = data.queue_detail.get(&item.id) {
-                render_song_detail(frame, area, detail, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+                render_song_detail(frame, area, detail);
             } else {
-                render_queue_item_detail(frame, area, item, data.queue.current_index == Some(selected), image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+                render_queue_item_detail(frame, area, item, data.queue.current_index == Some(selected));
             }
         }
     } else if *parent_node == NavNode::SearchResults {
         match data.search_type {
             SearchType::Song => {
                 if let Some(song) = data.song_cache.get(&NavNode::SearchResults).and_then(|s| s.get(selected)) {
-                    render_song_detail(frame, area, song, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+                    render_song_detail(frame, area, song);
                 }
             }
             SearchType::User => {
                 if let Some(user) = data.search_users.get(selected) {
-                    render_user_preview(frame, area, user, image_cache, font_size, last_image_rect);
+                    render_user_preview(frame, area, user);
                 }
             }
             SearchType::Playlist => {
                 if let Some(pl) = data.search_playlists.get(selected) {
-                    render_playlist_preview(frame, area, pl, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+                    render_playlist_preview(frame, area, pl);
                 }
             }
         }
     } else if let Some(songs) = data.song_cache.get(parent_node) {
         if let Some(song) = songs.get(selected) {
-            render_song_detail(frame, area, song, image_cache, font_size, last_image_rect, data.settings.display.cover_scale);
+            render_song_detail(frame, area, song);
         }
     }
-}
-
-/// 按百分比缩放正方形封面。
-///
-/// 在像素空间算出最大正方形边长，按 pct 缩放后转回 cell 数。
-/// cell rect 可能不是精确像素正方形（差值 < 1 cell），配合 Resize::Crop
-/// 渲染时裁掉亚 cell 级多余像素，视觉上既平滑又无黑边。
-fn scaled_square(max_w: u16, max_h: u16, fw: u16, fh: u16, pct: u8) -> (u16, u16) {
-    let side_px = (max_w as u32 * fw as u32).min(max_h as u32 * fh as u32);
-    let scaled_px = (side_px * pct as u32 / 100).max(1);
-    let w = (scaled_px / fw as u32).min(max_w as u32).max(1) as u16;
-    let h = (scaled_px / fh as u32).min(max_h as u32).max(1) as u16;
-    (w, h)
 }
 
 /// 渲染队列项目详情预览
@@ -448,44 +428,8 @@ fn render_queue_item_detail(
     area: Rect,
     item: &crate::model::queue::MusicQueueItem,
     is_playing: bool,
-    image_cache: &mut HashMap<String, StatefulProtocol>,
-    font_size: (u16, u16),
-    last_image_rect: &mut Rect,
-    cover_scale: u8,
 ) {
     let inner = super::util::padded_rect(area, 2);
-
-    let wants_cover = !item.cover_url.is_empty();
-    let has_cover = wants_cover && image_cache.contains_key(&item.cover_url);
-
-    let (img_area, text_area) = if wants_cover {
-        let (img_width, img_height) =
-            scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
-        let chunks = Layout::vertical([Constraint::Length(img_height), Constraint::Min(1)])
-            .split(inner);
-        let x_offset = inner.width.saturating_sub(img_width) / 2;
-        let img_rect = Rect {
-            x: inner.x + x_offset,
-            y: chunks[0].y,
-            width: img_width,
-            height: img_height,
-        };
-        *last_image_rect = img_rect;
-        if has_cover {
-            (Some(img_rect), chunks[1])
-        } else {
-            (None, inner)
-        }
-    } else {
-        (None, inner)
-    };
-
-    if let Some(img_rect) = img_area {
-        if let Some(protocol) = image_cache.get_mut(&item.cover_url) {
-            let image = StatefulImage::new();
-            frame.render_stateful_widget(image, img_rect, protocol);
-        }
-    }
 
     let mut lines = Vec::new();
 
@@ -520,7 +464,7 @@ fn render_queue_item_detail(
     )));
 
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(para, text_area);
+    frame.render_widget(para, inner);
 }
 
 /// 渲染歌曲列表预览（Preview 栏中显示标题列表）
@@ -543,46 +487,8 @@ fn render_song_detail(
     frame: &mut Frame,
     area: Rect,
     song: &PublicSongDetail,
-    image_cache: &mut HashMap<String, StatefulProtocol>,
-    font_size: (u16, u16),
-    last_image_rect: &mut Rect,
-    cover_scale: u8,
 ) {
     let inner = super::util::padded_rect(area, 2);
-
-    let wants_cover = !song.cover_url.is_empty();
-    let has_cover = wants_cover && image_cache.contains_key(&song.cover_url);
-
-    // 只要有 cover_url 就计算 hint rect，供下一次图片加载使用
-    let (img_area, text_area) = if wants_cover {
-        let (img_width, img_height) =
-            scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
-        let chunks = Layout::vertical([Constraint::Length(img_height), Constraint::Min(1)])
-            .split(inner);
-        let x_offset = inner.width.saturating_sub(img_width) / 2;
-        let img_rect = Rect {
-            x: inner.x + x_offset,
-            y: chunks[0].y,
-            width: img_width,
-            height: img_height,
-        };
-        *last_image_rect = img_rect;
-        if has_cover {
-            (Some(img_rect), chunks[1])
-        } else {
-            (None, inner)
-        }
-    } else {
-        (None, inner)
-    };
-
-    // 渲染封面图
-    if let Some(img_rect) = img_area {
-        if let Some(protocol) = image_cache.get_mut(&song.cover_url) {
-            let image = StatefulImage::new();
-            frame.render_stateful_widget(image, img_rect, protocol);
-        }
-    }
 
     let mut lines = vec![
         Line::from(Span::styled(
@@ -700,7 +606,7 @@ fn render_song_detail(
     }
 
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(para, text_area);
+    frame.render_widget(para, inner);
 }
 
 /// 按显示宽度截断文本，末尾加 ".."
@@ -834,29 +740,8 @@ fn render_user_preview(
     frame: &mut Frame,
     area: Rect,
     user: &PublicUserProfile,
-    image_cache: &mut HashMap<String, StatefulProtocol>,
-    font_size: (u16, u16),
-    last_image_rect: &mut Rect,
 ) {
     let inner = super::util::padded_rect(area, 2);
-    let avatar_url = user.avatar_url.as_deref().unwrap_or("");
-    let wants_avatar = !avatar_url.is_empty();
-    let has_avatar = wants_avatar && image_cache.contains_key(avatar_url);
-    let (img_area, text_area) = if wants_avatar {
-        let max_h = inner.height / 4;
-        let half_w = inner.width / 2;
-        let (iw, ih) = scaled_square(half_w, max_h, font_size.0, font_size.1, 100);
-        let chunks = Layout::vertical([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
-        let xo = inner.width.saturating_sub(iw) / 2;
-        let r = Rect { x: inner.x + xo, y: chunks[0].y, width: iw, height: ih };
-        *last_image_rect = r;
-        if has_avatar { (Some(r), chunks[1]) } else { (None, inner) }
-    } else { (None, inner) };
-    if let Some(r) = img_area {
-        if let Some(p) = image_cache.get_mut(avatar_url) {
-            frame.render_stateful_widget(StatefulImage::new(), r, p);
-        }
-    }
     let mut lines = vec![Line::from(Span::styled(user.username.clone(), Style::default().add_modifier(Modifier::BOLD)))];
     if let Some(bio) = &user.bio {
         if !bio.is_empty() {
@@ -864,7 +749,7 @@ fn render_user_preview(
             for l in bio.lines() { lines.push(Line::from(Span::styled(l.to_string(), Theme::secondary()))); }
         }
     }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), text_area);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 /// 渲染歌单搜索结果预览
@@ -872,28 +757,8 @@ fn render_playlist_preview(
     frame: &mut Frame,
     area: Rect,
     pl: &PlaylistMetadata,
-    image_cache: &mut HashMap<String, StatefulProtocol>,
-    font_size: (u16, u16),
-    last_image_rect: &mut Rect,
-    cover_scale: u8,
 ) {
     let inner = super::util::padded_rect(area, 2);
-    let cover_url = pl.cover_url.as_deref().unwrap_or("");
-    let wants_cover = !cover_url.is_empty();
-    let has_cover = wants_cover && image_cache.contains_key(cover_url);
-    let (img_area, text_area) = if wants_cover {
-        let (iw, ih) = scaled_square(inner.width, inner.height, font_size.0, font_size.1, cover_scale);
-        let chunks = Layout::vertical([Constraint::Length(ih), Constraint::Min(1)]).split(inner);
-        let xo = inner.width.saturating_sub(iw) / 2;
-        let r = Rect { x: inner.x + xo, y: chunks[0].y, width: iw, height: ih };
-        *last_image_rect = r;
-        if has_cover { (Some(r), chunks[1]) } else { (None, inner) }
-    } else { (None, inner) };
-    if let Some(r) = img_area {
-        if let Some(p) = image_cache.get_mut(cover_url) {
-            frame.render_stateful_widget(StatefulImage::new(), r, p);
-        }
-    }
     let mut lines = vec![
         Line::from(Span::styled(pl.name.clone(), Style::default().add_modifier(Modifier::BOLD))),
         Line::from(Span::styled(format!("by {}", pl.user_name), Theme::secondary())),
@@ -909,5 +774,5 @@ fn render_playlist_preview(
             for l in desc.lines() { lines.push(Line::from(Span::styled(l.to_string(), Theme::secondary()))); }
         }
     }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), text_area);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }

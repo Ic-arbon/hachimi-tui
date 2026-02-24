@@ -133,8 +133,6 @@ impl App {
     }
 
     fn render_miller(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        let font_size = self.cache.picker.as_ref()
-            .map(|p| p.font_size()).unwrap_or((8, 16));
         let data = crate::ui::miller::ColumnData {
             song_cache: &self.cache.songs,
             tag_cache: self.cache.tags.as_deref().unwrap_or_default(),
@@ -153,9 +151,6 @@ impl App {
             &self.nav,
             &data,
             self.scroll_tick,
-            &mut self.cache.images,
-            font_size,
-            &mut self.cache.last_image_rect,
         );
     }
 
@@ -255,9 +250,6 @@ impl App {
     }
 
     fn render_player_view(&mut self, frame: &mut Frame, area: ratatui::layout::Rect) {
-        let font_size = self.cache.picker.as_ref()
-            .map(|p| p.font_size()).unwrap_or((8, 16));
-
         // 优先展示导航中选中的歌曲，回退到播放中歌曲
         let node = self.nav.current().node.clone();
         let sel_idx = self.nav.current().selected;
@@ -315,9 +307,6 @@ impl App {
             area,
             &detail,
             playback,
-            &mut self.cache.images,
-            font_size,
-            &mut self.cache.last_image_rect,
         );
     }
 }
