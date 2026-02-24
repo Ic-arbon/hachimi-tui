@@ -104,7 +104,7 @@ impl App {
 
             let result = tokio::task::spawn_blocking(move || {
                 let img = image::load_from_memory(&bytes).ok()?;
-                let img = img.resize(500, 500, image::imageops::FilterType::Lanczos3);
+                let img = img.resize(800, 800, image::imageops::FilterType::Lanczos3);
                 let rgb = img.to_rgb8();
                 let (w, h) = rgb.dimensions();
                 let raw_pixels = rgb.into_raw();

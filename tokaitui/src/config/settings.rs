@@ -59,7 +59,7 @@ fn default_cache_size() -> u64 {
     2048
 }
 fn default_cover_scale() -> u8 {
-    70
+    100
 }
 
 impl Default for Settings {

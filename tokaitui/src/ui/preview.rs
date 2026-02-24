@@ -24,6 +24,7 @@ pub fn render_preview_column(
     data: &ColumnData,
 ) {
     let covers = data.covers;
+    let scale = data.settings.display.cover_scale;
     if parent_node.has_static_children() {
         let children = parent_node.children();
         if children.is_empty() {
@@ -122,32 +123,32 @@ pub fn render_preview_column(
     } else if *parent_node == NavNode::Queue {
         if let Some(item) = data.queue.songs.get(selected) {
             if let Some(detail) = data.queue_detail.get(&item.id) {
-                render_song_detail(frame, area, detail, covers);
+                render_song_detail(frame, area, detail, covers, scale);
             } else {
-                render_queue_item_detail(frame, area, item, data.queue.current_index == Some(selected), covers);
+                render_queue_item_detail(frame, area, item, data.queue.current_index == Some(selected), covers, scale);
             }
         }
     } else if *parent_node == NavNode::SearchResults {
         match data.search_type {
             SearchType::Song => {
                 if let Some(song) = data.song_cache.get(&NavNode::SearchResults).and_then(|s| s.get(selected)) {
-                    render_song_detail(frame, area, song, covers);
+                    render_song_detail(frame, area, song, covers, scale);
                 }
             }
             SearchType::User => {
                 if let Some(user) = data.search_users.get(selected) {
-                    render_user_preview(frame, area, user, covers);
+                    render_user_preview(frame, area, user, covers, scale);
                 }
             }
             SearchType::Playlist => {
                 if let Some(pl) = data.search_playlists.get(selected) {
-                    render_playlist_preview(frame, area, pl, covers);
+                    render_playlist_preview(frame, area, pl, covers, scale);
                 }
             }
         }
     } else if let Some(songs) = data.song_cache.get(parent_node) {
         if let Some(song) = songs.get(selected) {
-            render_song_detail(frame, area, song, covers);
+            render_song_detail(frame, area, song, covers, scale);
         }
     }
 }
@@ -159,9 +160,10 @@ fn render_queue_item_detail(
     item: &crate::model::queue::MusicQueueItem,
     is_playing: bool,
     covers: &HashMap<String, u32>,
+    cover_scale: u8,
 ) {
     let inner = super::util::padded_rect(area, 2);
-    let inner = apply_cover(frame, inner, &item.cover_url, covers);
+    let inner = apply_cover(frame, inner, &item.cover_url, covers, cover_scale);
 
     let mut lines = Vec::new();
 
@@ -220,9 +222,10 @@ fn render_song_detail(
     area: Rect,
     song: &PublicSongDetail,
     covers: &HashMap<String, u32>,
+    cover_scale: u8,
 ) {
     let inner = super::util::padded_rect(area, 2);
-    let inner = apply_cover(frame, inner, &song.cover_url, covers);
+    let inner = apply_cover(frame, inner, &song.cover_url, covers, cover_scale);
 
     let mut lines = vec![
         Line::from(Span::styled(
@@ -349,10 +352,11 @@ fn render_user_preview(
     area: Rect,
     user: &PublicUserProfile,
     covers: &HashMap<String, u32>,
+    cover_scale: u8,
 ) {
     let inner = super::util::padded_rect(area, 2);
     let inner = if let Some(ref url) = user.avatar_url {
-        apply_cover(frame, inner, url, covers)
+        apply_cover(frame, inner, url, covers, cover_scale)
     } else {
         inner
     };
@@ -372,10 +376,11 @@ fn render_playlist_preview(
     area: Rect,
     pl: &PlaylistMetadata,
     covers: &HashMap<String, u32>,
+    cover_scale: u8,
 ) {
     let inner = super::util::padded_rect(area, 2);
     let inner = if let Some(ref url) = pl.cover_url {
-        apply_cover(frame, inner, url, covers)
+        apply_cover(frame, inner, url, covers, cover_scale)
     } else {
         inner
     };
@@ -403,11 +408,13 @@ pub fn apply_cover(
     inner: Rect,
     cover_url: &str,
     covers: &HashMap<String, u32>,
+    cover_scale: u8,
 ) -> Rect {
-    let cover_h = (inner.height / 3).min(14);
-    if cover_h < 4 {
+    let base_h = (inner.height / 3).min(20);
+    if base_h < 4 {
         return inner;
     }
+    let cover_h = (base_h as u32 * cover_scale as u32 / 100).max(2) as u16;
     if let Some(&id) = covers.get(cover_url) {
         let cover_w = (cover_h * 2).min(inner.width);
         let cx = inner.x + (inner.width - cover_w) / 2;

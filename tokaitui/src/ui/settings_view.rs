@@ -97,7 +97,7 @@ pub fn render_hint(frame: &mut Frame, area: Rect, selected: usize, settings: &Se
         3 => {
             let pct = settings.display.cover_scale;
             let bar_width = 20usize;
-            let filled = (pct as usize * bar_width / 100).min(bar_width);
+            let filled = (pct as usize * bar_width / 200).min(bar_width);
             let empty = bar_width - filled;
             lines.push(Line::from(vec![
                 Span::styled("▕", Theme::secondary()),
@@ -197,7 +197,7 @@ pub fn cycle_setting(settings: &mut Settings, index: usize) {
         }
         3 => {
             let v = settings.display.cover_scale;
-            settings.display.cover_scale = if v >= 100 { 20 } else { v + 10 };
+            settings.display.cover_scale = if v >= 200 { 20 } else { v + 10 };
         }
         _ => {}
     }

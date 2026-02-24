@@ -186,7 +186,7 @@ fn tr_en(key: &str) -> &'static str {
         "settings.lang.en.desc" => "Full English interface",
         "settings.lang.zh.desc" => "Simplified Chinese interface",
         "settings.cover_scale" => "Cover Scale",
-        "settings.desc.cover_scale" => "Cover image scale in the browser preview (20%-100%)",
+        "settings.desc.cover_scale" => "Cover image scale in the browser preview (20%-200%)",
 
         _ => "???",
     }
@@ -311,7 +311,7 @@ fn tr_zh(key: &str) -> &'static str {
         "settings.lang.en.desc" => "英文界面",
         "settings.lang.zh.desc" => "简体中文界面",
         "settings.cover_scale" => "封面缩放",
-        "settings.desc.cover_scale" => "浏览视图中预览封面图的缩放比例 (20%-100%)",
+        "settings.desc.cover_scale" => "浏览视图中预览封面图的缩放比例 (20%-200%)",
 
         _ => tr_en(key),
     }
