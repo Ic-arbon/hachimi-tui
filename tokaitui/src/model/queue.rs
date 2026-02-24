@@ -95,7 +95,6 @@ impl QueueState {
         }
     }
 
-    #[allow(dead_code)] // TODO: 插队播放
     pub fn insert_next(&mut self, item: MusicQueueItem) {
         let pos = self.current_index.map_or(0, |i| i + 1);
         self.songs.insert(pos, item);

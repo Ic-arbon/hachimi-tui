@@ -19,7 +19,7 @@ impl App {
         // 终端大小变化：标记需要在下次 draw() 之后重新上传 image data
         // （不能在此处写 stdout，ratatui 的 \x1b[2J 清屏发生在下次 draw() 里，会覆盖提前写入的数据）
         if let Event::Resize(_, _) = event {
-            self.needs_cover_reupload = true;
+            self.cover.needs_cover_reupload = true;
             return;
         }
 
@@ -30,45 +30,52 @@ impl App {
                 return;
             }
 
-            // 帮助浮层打开时，只响应关闭操作
-            if self.show_help {
-                match (key.modifiers, key.code) {
-                    (_, KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Esc) => {
-                        self.show_help = false;
-                        self.help_scroll = 0;
-                    }
-                    (_, KeyCode::Char('j') | KeyCode::Down) => {
-                        self.help_scroll = self.help_scroll.saturating_add(1);
-                    }
-                    (_, KeyCode::Char('k') | KeyCode::Up) => {
-                        self.help_scroll = self.help_scroll.saturating_sub(1);
-                    }
-                    _ => {}
-                }
+            if self.handle_overlay_key(key) {
                 return;
             }
 
-            // 日志浮层打开时，只响应滚动和关闭
-            if self.show_logs {
-                match (key.modifiers, key.code) {
-                    (_, KeyCode::Char('q') | KeyCode::Char('!') | KeyCode::Esc) => {
-                        self.show_logs = false;
-                    }
-                    (_, KeyCode::Char('j') | KeyCode::Down) => self.logs.scroll_down(),
-                    (_, KeyCode::Char('k') | KeyCode::Up) => self.logs.scroll_up(),
-                    (_, KeyCode::Char('h') | KeyCode::Left) => self.logs.scroll_left(),
-                    (_, KeyCode::Char('l') | KeyCode::Right) => self.logs.scroll_right(),
-                    _ => {}
-                }
-                return;
-            }
-
-            match self.input_mode {
+            match self.ui.input_mode {
                 InputMode::Normal => self.handle_normal_key(key),
                 InputMode::Search => self.handle_search_key(key),
                 InputMode::Login => self.handle_login_key(key),
             }
         }
+    }
+
+    /// 帮助/日志浮层的键处理，返回 true 表示浮层已拦截事件
+    fn handle_overlay_key(&mut self, key: KeyEvent) -> bool {
+        if self.ui.show_help {
+            match (key.modifiers, key.code) {
+                (_, KeyCode::Char('q') | KeyCode::Char('?') | KeyCode::Esc) => {
+                    self.ui.show_help = false;
+                    self.ui.help_scroll = 0;
+                }
+                (_, KeyCode::Char('j') | KeyCode::Down) => {
+                    self.ui.help_scroll = self.ui.help_scroll.saturating_add(1);
+                }
+                (_, KeyCode::Char('k') | KeyCode::Up) => {
+                    self.ui.help_scroll = self.ui.help_scroll.saturating_sub(1);
+                }
+                _ => {}
+            }
+            return true;
+        }
+
+        if self.ui.show_logs {
+            match (key.modifiers, key.code) {
+                (_, KeyCode::Char('q') | KeyCode::Char('!') | KeyCode::Esc) => {
+                    self.ui.show_logs = false;
+                }
+                (_, KeyCode::Char('j') | KeyCode::Down) => self.ui.logs.scroll_down(),
+                (_, KeyCode::Char('k') | KeyCode::Up) => self.ui.logs.scroll_up(),
+                (_, KeyCode::Char('h') | KeyCode::Left) => self.ui.logs.scroll_left(),
+                (_, KeyCode::Char('l') | KeyCode::Right) => self.ui.logs.scroll_right(),
+                _ => {}
+            }
+            return true;
+        }
+
+        false
     }
 
     fn adjust_volume(&mut self, delta: i16) {
@@ -91,10 +98,10 @@ impl App {
             (_, KeyCode::Char('q')) | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
                 self.running = false;
             }
-            (_, KeyCode::Char('?')) => self.show_help = true,
+            (_, KeyCode::Char('?')) => self.ui.show_help = true,
             (_, KeyCode::Char('!')) => {
-                self.show_logs = true;
-                self.logs.mark_read();
+                self.ui.show_logs = true;
+                self.ui.logs.mark_read();
             }
             (_, KeyCode::Char('L')) => self.logout(),
             (_, KeyCode::Char(' ')) => self.toggle_play_pause(),
@@ -149,7 +156,7 @@ impl App {
             (_, KeyCode::Char('/')) => {
                 if self.nav.current().node != NavNode::Settings {
                     self.search.clear();
-                    self.input_mode = InputMode::Search;
+                    self.ui.input_mode = InputMode::Search;
                 }
             }
             (_, KeyCode::Tab) => {
@@ -184,10 +191,10 @@ impl App {
     fn handle_search_key(&mut self, key: KeyEvent) {
         match (key.modifiers, key.code) {
             (_, KeyCode::Esc) => {
-                self.input_mode = InputMode::Normal;
+                self.ui.input_mode = InputMode::Normal;
             }
             (_, KeyCode::Enter) => {
-                self.input_mode = InputMode::Normal;
+                self.ui.input_mode = InputMode::Normal;
                 if !self.search.query.trim().is_empty() {
                     self.execute_search();
                     if !self.nav.pop_to(&NavNode::SearchResults) {
@@ -291,12 +298,12 @@ impl App {
                 self.handle_event(ev);
             }
             AppMessage::PlayerTick => {
-                self.scroll_tick = self.scroll_tick.wrapping_add(1);
-                if let Some((url, t)) = self.pending_cover_load.take() {
+                self.ui.scroll_tick = self.ui.scroll_tick.wrapping_add(1);
+                if let Some((url, t)) = self.cover.pending_cover_load.take() {
                     if t.elapsed() >= Duration::from_millis(250) {
                         self.maybe_load_cover(url);
                     } else {
-                        self.pending_cover_load = Some((url, t));
+                        self.cover.pending_cover_load = Some((url, t));
                     }
                 }
             }
@@ -326,7 +333,7 @@ impl App {
                     }
                     PlayerEvent::Error(msg) => {
                         self.player.bar.is_loading = false;
-                        self.logs.push(LogLevel::Error, msg);
+                        self.ui.logs.push(LogLevel::Error, msg);
                     }
                     PlayerEvent::Loading => {
                         self.player.bar.is_loading = true;
@@ -363,7 +370,7 @@ impl App {
             }
             AppMessage::AudioFetchError(err) => {
                 self.player.bar.is_loading = false;
-                self.logs.push(LogLevel::Error, err);
+                self.ui.logs.push(LogLevel::Error, err);
             }
             AppMessage::DataLoaded(payload) => match payload {
                 DataPayload::Songs(node, songs) => {
@@ -395,7 +402,7 @@ impl App {
                 }
             },
             AppMessage::Error(err) => {
-                self.logs.push(LogLevel::Error, err);
+                self.ui.logs.push(LogLevel::Error, err);
             }
             AppMessage::CaptchaGenerated(result) => {
                 match result {
@@ -424,7 +431,7 @@ impl App {
                         self.username = Some(resp.username);
                         self.login.step = LoginStep::Input;
                         self.login.captcha_key = None;
-                        self.input_mode = InputMode::Normal;
+                        self.ui.input_mode = InputMode::Normal;
                         self.resume_playback();
                     }
                     Err(e) => {
@@ -451,7 +458,7 @@ impl App {
                 self.cache.covers.mark_loaded(url, id, upload_seq);
             }
             AppMessage::DanmakuFetched { title, path } => {
-                self.logs.push(LogLevel::Info, format!("弹幕已保存：{path}  ({title})"));
+                self.ui.logs.push(LogLevel::Info, format!("弹幕已保存：{path}  ({title})"));
             }
         }
     }

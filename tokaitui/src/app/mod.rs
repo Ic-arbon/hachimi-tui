@@ -187,6 +187,22 @@ pub struct DataCache {
     pub covers: CoverCache,
 }
 
+pub struct UiState {
+    pub input_mode: InputMode,
+    pub show_help: bool,
+    pub help_scroll: u16,
+    pub show_logs: bool,
+    pub logs: LogStore,
+    pub scroll_tick: u16,
+}
+
+pub struct CoverState {
+    pub kitty_supported: bool,
+    pub pending_cover_load: Option<(String, std::time::Instant)>,
+    pub active_cover_ids: Vec<u32>,
+    pub needs_cover_reupload: bool,
+}
+
 pub struct App {
     pub running: bool,
     pub settings: Settings,
@@ -196,26 +212,14 @@ pub struct App {
     pub cache: DataCache,
     pub nav: NavStack,
     pub search: SearchState,
-    pub input_mode: InputMode,
+    pub ui: UiState,
+    pub cover: CoverState,
     pub login: LoginState,
-    pub show_help: bool,
-    pub help_scroll: u16,
-    pub show_logs: bool,
-    pub logs: LogStore,
     pub username: Option<String>,
-    pub scroll_tick: u16,
     pub msg_tx: mpsc::UnboundedSender<AppMessage>,
     msg_rx: mpsc::UnboundedReceiver<AppMessage>,
     /// 启动时待恢复的播放进度（毫秒），seek 后清零
     pub(crate) resume_position_ms: Option<u64>,
-    /// 终端是否支持 Kitty 图形协议
-    pub kitty_supported: bool,
-    /// 待加载的封面（URL, 开始等待时刻），用于防抖
-    pub pending_cover_load: Option<(String, std::time::Instant)>,
-    /// 上帧已放置的封面 image ID，用于下帧清除不再显示的封面
-    pub active_cover_ids: Vec<u32>,
-    /// 终端缩放后需要在 draw() 之后重新上传 image data
-    pub needs_cover_reupload: bool,
 }
 
 impl App {
@@ -241,21 +245,25 @@ impl App {
             let authenticated = client.is_authenticated().await;
             // 旧 auth 文件可能没有 username，从 JWT 提取 uid 后调 API 获取
             let name = if name.is_none() && authenticated {
-                if let Some(uid) = crate::config::auth_store::extract_uid_from_token(&auth.access_token) {
-                    match client.user_profile(uid).await {
-                        Ok(profile) => {
-                            let uname = profile.username.clone();
-                            // 回存到 auth 文件
-                            let mut updated = crate::config::auth_store::load()
-                                .ok().flatten().unwrap_or(auth);
-                            updated.username = Some(uname.clone());
-                            let _ = crate::config::auth_store::save(&updated);
-                            Some(uname)
+                match crate::config::auth_store::extract_uid_from_token(&auth.access_token) {
+                    Ok(uid) => {
+                        match client.user_profile(uid).await {
+                            Ok(profile) => {
+                                let uname = profile.username.clone();
+                                // 回存到 auth 文件
+                                let mut updated = crate::config::auth_store::load()
+                                    .ok().flatten().unwrap_or(auth);
+                                updated.username = Some(uname.clone());
+                                let _ = crate::config::auth_store::save(&updated);
+                                Some(uname)
+                            }
+                            _ => None,
                         }
-                        _ => None,
                     }
-                } else {
-                    None
+                    Err(e) => {
+                        eprintln!("[auth] {e}");
+                        None
+                    }
                 }
             } else {
                 name
@@ -293,7 +301,20 @@ impl App {
             client,
             nav: NavStack::new(),
             search: SearchState::new(),
-            input_mode,
+            ui: UiState {
+                input_mode,
+                show_help: false,
+                help_scroll: 0,
+                show_logs: false,
+                logs: LogStore::new(),
+                scroll_tick: 0,
+            },
+            cover: CoverState {
+                kitty_supported: crate::ui::kitty::is_supported(),
+                pending_cover_load: None,
+                active_cover_ids: Vec::new(),
+                needs_cover_reupload: false,
+            },
             player: PlayerState {
                 engine,
                 bar: PlayerBarState::default(),
@@ -317,19 +338,10 @@ impl App {
                 covers: CoverCache::new(),
             },
             login: LoginState::new(),
-            show_help: false,
-            help_scroll: 0,
-            show_logs: false,
-            logs: LogStore::new(),
             username: saved_username,
-            scroll_tick: 0,
             msg_tx,
             msg_rx,
             resume_position_ms,
-            kitty_supported: crate::ui::kitty::is_supported(),
-            pending_cover_load: None,
-            active_cover_ids: Vec::new(),
-            needs_cover_reupload: false,
         })
     }
 

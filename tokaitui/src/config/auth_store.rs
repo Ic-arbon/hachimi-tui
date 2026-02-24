@@ -30,15 +30,20 @@ pub fn save(data: &AuthData) -> Result<()> {
 }
 
 /// 从 JWT access token 的 payload 中提取 uid（sub 字段）
-pub fn extract_uid_from_token(token: &str) -> Option<i64> {
+pub fn extract_uid_from_token(token: &str) -> Result<i64, String> {
     let parts: Vec<&str> = token.split('.').collect();
     if parts.len() != 3 {
-        return None;
+        return Err(format!("JWT 格式错误：期望 3 段，实际 {} 段", parts.len()));
     }
-    let payload = base64url_decode(parts[1])?;
-    let json: serde_json::Value = serde_json::from_slice(&payload).ok()?;
-    let sub = json.get("sub")?.as_str()?;
-    sub.parse().ok()
+    let payload = base64url_decode(parts[1])
+        .ok_or_else(|| "JWT payload base64 解码失败".to_string())?;
+    let json: serde_json::Value = serde_json::from_slice(&payload)
+        .map_err(|e| format!("JWT payload JSON 解析失败：{e}"))?;
+    let sub = json.get("sub")
+        .ok_or_else(|| "JWT payload 缺少 sub 字段".to_string())?
+        .as_str()
+        .ok_or_else(|| "JWT sub 字段不是字符串".to_string())?;
+    sub.parse().map_err(|e| format!("JWT sub 无法解析为 i64：{e}"))
 }
 
 fn base64url_decode(input: &str) -> Option<Vec<u8>> {

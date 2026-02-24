@@ -7,6 +7,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use crate::ui::constants::{HEADER_HEIGHT, PLAYER_BAR_HEIGHT, SEARCH_BAR_HEIGHT};
 use crate::ui::navigation::NavNode;
 
 use super::{App, InputMode};
@@ -14,18 +15,18 @@ use super::{App, InputMode};
 impl App {
     pub(crate) fn render(&mut self, frame: &mut Frame) {
         let chunks = Layout::vertical([
-                Constraint::Length(1),
+                Constraint::Length(HEADER_HEIGHT),
                 Constraint::Min(1),
-                Constraint::Length(1),
+                Constraint::Length(PLAYER_BAR_HEIGHT),
             ])
             .split(frame.area());
 
         self.render_header(frame, chunks[0]);
 
         // 浮层打开时跳过底层内容渲染，避免 Kitty 图片协议残留
-        let has_overlay = self.show_help || self.show_logs;
+        let has_overlay = self.ui.show_help || self.ui.show_logs;
 
-        match self.input_mode {
+        match self.ui.input_mode {
             InputMode::Login => {
                 crate::ui::login::render(frame, chunks[1], &self.login);
             }
@@ -34,11 +35,11 @@ impl App {
                     self.render_player_view(frame, chunks[1]);
                 } else if self.nav.current().node == NavNode::Settings {
                     self.render_settings(frame, chunks[1]);
-                } else if self.input_mode == InputMode::Search
+                } else if self.ui.input_mode == InputMode::Search
                     || self.nav.contains(&NavNode::SearchResults)
                 {
                     // 搜索模式或搜索结果导航中：顶部搜索栏 + 下方 miller
-                    let search_chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)])
+                    let search_chunks = Layout::vertical([Constraint::Length(SEARCH_BAR_HEIGHT), Constraint::Min(1)])
                         .split(chunks[1]);
                     self.render_search_bar(frame, search_chunks[0]);
                     self.render_miller(frame, search_chunks[1]);
@@ -53,12 +54,12 @@ impl App {
             self.render_player_bar(frame, chunks[2]);
         }
 
-        if self.show_logs {
-            crate::ui::log_view::render(frame, frame.area(), &self.logs);
+        if self.ui.show_logs {
+            crate::ui::log_view::render(frame, frame.area(), &self.ui.logs);
         }
 
-        if self.show_help {
-            crate::ui::help::render(frame, frame.area(), self.help_scroll);
+        if self.ui.show_help {
+            crate::ui::help::render(frame, frame.area(), self.ui.help_scroll);
         }
     }
 
@@ -103,9 +104,9 @@ impl App {
 
         let mut right_spans: Vec<Span> = Vec::new();
 
-        if self.logs.unread_count > 0 {
+        if self.ui.logs.unread_count > 0 {
             right_spans.push(Span::styled(
-                format!(" ! {} ", self.logs.unread_count),
+                format!(" ! {} ", self.ui.logs.unread_count),
                 Style::default().fg(Color::White).bg(Color::Red),
             ));
         }
@@ -151,7 +152,7 @@ impl App {
             area,
             &self.nav,
             &data,
-            self.scroll_tick,
+            self.ui.scroll_tick,
         );
     }
 
@@ -170,7 +171,7 @@ impl App {
             Span::styled(" / ", Style::default().fg(Color::DarkGray)),
         ];
 
-        if self.input_mode == InputMode::Search {
+        if self.ui.input_mode == InputMode::Search {
             // 编辑模式：query 中光标位置用高亮显示
             let before: String = query.chars().take(cursor).collect();
             let cursor_char: String = query.chars().skip(cursor).take(1).collect();
@@ -224,21 +225,21 @@ impl App {
 
         let new_ids: Vec<u32> = placements.iter().map(|(id, _)| *id).collect();
 
-        if self.active_cover_ids.is_empty() && placements.is_empty() && !self.needs_cover_reupload {
+        if self.cover.active_cover_ids.is_empty() && placements.is_empty() && !self.cover.needs_cover_reupload {
             return Ok(());
         }
 
         let mut out = std::io::stdout().lock();
 
         // 终端缩放后 image data 被清除，需先重新上传再放置
-        if self.needs_cover_reupload {
+        if self.cover.needs_cover_reupload {
             for seq in self.cache.covers.all_upload_seqs() {
                 out.write_all(seq)?;
             }
-            self.needs_cover_reupload = false;
+            self.cover.needs_cover_reupload = false;
         }
 
-        if self.active_cover_ids.is_empty() && placements.is_empty() {
+        if self.cover.active_cover_ids.is_empty() && placements.is_empty() {
             out.flush()?;
             return Ok(());
         }
@@ -246,7 +247,7 @@ impl App {
         out.write_all(b"\x1b7")?;
 
         // 删除所有上帧 placement（d=i 小写：保留 image data，避免 re-place 时数据不存在）
-        for &id in &self.active_cover_ids {
+        for &id in &self.cover.active_cover_ids {
             out.write_all(&crate::ui::kitty::delete_placement(id))?;
         }
 
@@ -259,18 +260,19 @@ impl App {
         out.write_all(b"\x1b8")?;
         out.flush()?;
 
-        self.active_cover_ids = new_ids;
+        self.cover.active_cover_ids = new_ids;
         Ok(())
     }
 
     fn render_settings(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         use ratatui::style::Modifier;
         use ratatui::widgets::{List, ListItem};
+        use crate::ui::constants::{MILLER_PARENT_PCT, MILLER_CURRENT_PCT, MILLER_PREVIEW_PCT};
 
         let cols = Layout::horizontal([
-                Constraint::Percentage(15),
-                Constraint::Percentage(45),
-                Constraint::Percentage(40),
+                Constraint::Percentage(MILLER_PARENT_PCT),
+                Constraint::Percentage(MILLER_CURRENT_PCT),
+                Constraint::Percentage(MILLER_PREVIEW_PCT),
             ])
             .split(area);
 
