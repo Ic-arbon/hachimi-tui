@@ -52,6 +52,12 @@ pub enum AppMessage {
         index: usize,
         detail: PublicSongDetail,
     },
+    /// 封面图片已上传到终端内存
+    CoverReady {
+        url: String,
+        id: u32,
+        upload_seq: Vec<u8>,
+    },
 }
 
 /// 后台加载的数据
@@ -96,6 +102,14 @@ pub struct DataCache {
     pub(crate) detail_loading: HashSet<i64>,
     /// 队列项的完整歌曲详情缓存（按歌曲 ID）
     pub(crate) queue_song_detail: HashMap<i64, PublicSongDetail>,
+    /// URL → Kitty image ID（已上传到终端）
+    pub covers: HashMap<String, u32>,
+    /// URL → 上传序列（a=t APC bytes），用于终端缩放后重新上传
+    pub cover_upload_seqs: HashMap<String, Vec<u8>>,
+    /// 正在下载的封面 URL
+    pub covers_loading: HashSet<String>,
+    /// 下一个可用的 Kitty image ID（从 1 开始）
+    pub next_cover_id: u32,
 }
 
 pub struct App {
@@ -119,6 +133,14 @@ pub struct App {
     msg_rx: mpsc::UnboundedReceiver<AppMessage>,
     /// 启动时待恢复的播放进度（毫秒），seek 后清零
     pub(crate) resume_position_ms: Option<u64>,
+    /// 终端是否支持 Kitty 图形协议
+    pub kitty_supported: bool,
+    /// 待加载的封面（URL, 开始等待时刻），用于防抖
+    pub pending_cover_load: Option<(String, std::time::Instant)>,
+    /// 上帧已放置的封面 image ID，用于下帧清除不再显示的封面
+    pub active_cover_ids: Vec<u32>,
+    /// 终端缩放后需要在 draw() 之后重新上传 image data
+    pub needs_cover_reupload: bool,
 }
 
 impl App {
@@ -217,6 +239,10 @@ impl App {
                 loading: HashSet::new(),
                 detail_loading: HashSet::new(),
                 queue_song_detail: HashMap::new(),
+                covers: HashMap::new(),
+                cover_upload_seqs: HashMap::new(),
+                covers_loading: HashSet::new(),
+                next_cover_id: 1,
             },
             login: LoginState::new(),
             show_help: false,
@@ -228,6 +254,10 @@ impl App {
             msg_tx,
             msg_rx,
             resume_position_ms,
+            kitty_supported: crate::ui::kitty::is_supported(),
+            pending_cover_load: None,
+            active_cover_ids: Vec::new(),
+            needs_cover_reupload: false,
         })
     }
 
@@ -302,6 +332,8 @@ impl App {
 
         while self.running {
             terminal.draw(|f| self.render(f))?;
+            // draw 结束后，将本帧收集的封面放置请求写入终端（光标定位放置，无 cursor-position 歧义）
+            let _ = self.render_cover_placements();
 
             // 等待至少一条消息
             if let Some(msg) = self.msg_rx.recv().await {

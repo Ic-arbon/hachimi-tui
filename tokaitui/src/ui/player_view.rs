@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
@@ -22,14 +24,33 @@ pub fn render(
     area: Rect,
     detail: &PublicSongDetail,
     playback: Option<PlaybackInfo<'_>>,
+    covers: &HashMap<String, u32>,
 ) {
-    // 右侧内容区（暂无封面，图片系统重构中）
     let padded = super::util::padded_rect(area, 2);
+
+    // 左右对半分
+    let cols = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(padded);
+    let left = cols[0];
     let inner = Rect {
-        y: padded.y + 1,
-        height: padded.height.saturating_sub(1),
-        ..padded
+        y: cols[1].y + 1,
+        height: cols[1].height.saturating_sub(1),
+        ..cols[1]
     };
+
+    // 左栏：封面水平垂直居中，视觉正方形（终端格子高≈宽的2倍，故 w=2h）
+    // 限制边：h = min(left.width/2, left.height) * 3/4，w = h*2
+    if let Some(&id) = covers.get(&detail.cover_url) {
+        let max_h = (left.width / 2).min(left.height) * 3 / 4;
+        if max_h >= 2 {
+            let cover_h = max_h;
+            let cover_w = cover_h * 2;
+            let cx = left.x + left.width.saturating_sub(cover_w) / 2;
+            let cy = left.y + left.height.saturating_sub(cover_h) / 2;
+            let cover_rect = Rect::new(cx, cy, cover_w, cover_h);
+            frame.render_widget(super::cover_widget::CoverWidget { image_id: id }, cover_rect);
+        }
+    }
 
     let header_lines = vec![
         Line::from(Span::styled(

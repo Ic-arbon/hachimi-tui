@@ -582,6 +582,7 @@ impl App {
         self.maybe_load_preview_data();
         self.maybe_fetch_song_detail();
         self.maybe_fetch_queue_detail();
+        self.schedule_cover_load();
     }
 
     /// 用户手动改变选中项后的共享后处理
@@ -757,6 +758,118 @@ impl App {
                 }
             });
         }
+    }
+
+    // — 封面图片 —
+
+    /// 返回当前导航选中项对应的封面 URL（用于触发封面加载）
+    pub(crate) fn current_preview_cover_url(&self) -> Option<String> {
+        let node = &self.nav.current().node;
+        let sel = self.nav.current().selected;
+
+        match node {
+            NavNode::Queue => {
+                let item = self.queue.songs.get(sel)?;
+                if let Some(detail) = self.cache.queue_song_detail.get(&item.id) {
+                    Some(detail.cover_url.clone())
+                } else {
+                    Some(item.cover_url.clone())
+                }
+            }
+            NavNode::SearchResults => match self.search.search_type {
+                SearchType::Song => {
+                    let song = self.cache.songs.get(node)?.get(sel)?;
+                    Some(song.cover_url.clone())
+                }
+                SearchType::User => {
+                    let user = self.cache.search_users.get(sel)?;
+                    user.avatar_url.clone()
+                }
+                SearchType::Playlist => {
+                    let pl = self.cache.search_playlists.get(sel)?;
+                    pl.cover_url.clone()
+                }
+            },
+            NavNode::MyPlaylists => {
+                let pl = self.cache.playlists.as_ref()?.get(sel)?;
+                pl.cover_url.clone()
+            }
+            node if !node.has_static_children() => {
+                let song = self.cache.songs.get(node)?.get(sel)?;
+                Some(song.cover_url.clone())
+            }
+            _ => None,
+        }
+    }
+
+    /// 记录待加载封面（防抖：实际加载在 PlayerTick 中延迟触发）
+    pub(crate) fn schedule_cover_load(&mut self) {
+        if !self.kitty_supported {
+            return;
+        }
+        if let Some(url) = self.current_preview_cover_url() {
+            if !url.is_empty() {
+                self.pending_cover_load = Some((url, std::time::Instant::now()));
+            }
+        }
+    }
+
+    /// 异步下载并上传封面到终端（Kitty 图形协议）
+    pub(crate) fn maybe_load_cover(&mut self, url: String) {
+        if !self.kitty_supported {
+            return;
+        }
+        if self.cache.covers.contains_key(&url) {
+            return;
+        }
+        if self.cache.covers_loading.contains(&url) {
+            return;
+        }
+
+        // 超过 10 张时淘汰最旧的一张
+        if self.cache.covers.len() >= 10 {
+            if let Some((old_url, old_id)) = self.cache.covers.iter().next().map(|(k, v)| (k.clone(), *v)) {
+                use std::io::Write;
+                let seq = crate::ui::kitty::delete_image(old_id);
+                let _ = std::io::stdout().write_all(&seq);
+                let _ = std::io::stdout().flush();
+                self.cache.covers.remove(&old_url);
+                self.cache.cover_upload_seqs.remove(&old_url);
+            }
+        }
+
+        let id = self.cache.next_cover_id;
+        self.cache.next_cover_id += 1;
+        self.cache.covers_loading.insert(url.clone());
+
+        let tx = self.msg_tx.clone();
+        let url_clone = url.clone();
+
+        tokio::spawn(async move {
+            let bytes = match reqwest::get(&url_clone).await {
+                Ok(resp) => match resp.bytes().await {
+                    Ok(b) => b.to_vec(),
+                    Err(_) => return,
+                },
+                Err(_) => return,
+            };
+
+            let result = tokio::task::spawn_blocking(move || {
+                let img = image::load_from_memory(&bytes).ok()?;
+                let img = img.resize(200, 200, image::imageops::FilterType::Lanczos3);
+                let rgb = img.to_rgb8();
+                let (w, h) = rgb.dimensions();
+                let raw_pixels = rgb.into_raw();
+                // 只上传，不创建 placement（placement 在每帧 draw 后由主循环负责）
+                let seq = crate::ui::kitty::upload_rgb(id, &raw_pixels, w, h);
+                Some(seq)
+            })
+            .await;
+
+            if let Ok(Some(upload_seq)) = result {
+                let _ = tx.send(AppMessage::CoverReady { url: url_clone, id, upload_seq });
+            }
+        });
     }
 
     /// 队列预览时异步获取选中项的完整歌曲详情

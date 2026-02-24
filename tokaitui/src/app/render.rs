@@ -144,6 +144,7 @@ impl App {
             search_type: self.search.search_type,
             search_users: &self.cache.search_users,
             search_playlists: &self.cache.search_playlists,
+            covers: &self.cache.covers,
         };
         crate::ui::miller::render(
             frame,
@@ -209,6 +210,57 @@ impl App {
 
     fn render_player_bar(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
         crate::ui::player_bar::render(frame, area, &self.player.bar);
+    }
+
+    /// draw 结束后，将本帧收集的封面放置请求写入 stdout
+    /// 每帧先删除所有上帧 placement（用 d=i 保留 image data），再重新放置本帧封面。
+    /// 这样可以正确处理：切换曲目、miller↔player_view 切换导致的位置变化、无封面时的清除。
+    pub(crate) fn render_cover_placements(&mut self) -> anyhow::Result<()> {
+        use std::io::Write;
+        use crate::ui::cover_widget::PENDING_PLACEMENTS;
+
+        let placements: Vec<(u32, ratatui::layout::Rect)> =
+            PENDING_PLACEMENTS.with(|p| p.borrow_mut().drain(..).collect());
+
+        let new_ids: Vec<u32> = placements.iter().map(|(id, _)| *id).collect();
+
+        if self.active_cover_ids.is_empty() && placements.is_empty() && !self.needs_cover_reupload {
+            return Ok(());
+        }
+
+        let mut out = std::io::stdout().lock();
+
+        // 终端缩放后 image data 被清除，需先重新上传再放置
+        if self.needs_cover_reupload {
+            for seq in self.cache.cover_upload_seqs.values() {
+                out.write_all(seq)?;
+            }
+            self.needs_cover_reupload = false;
+        }
+
+        if self.active_cover_ids.is_empty() && placements.is_empty() {
+            out.flush()?;
+            return Ok(());
+        }
+
+        out.write_all(b"\x1b7")?;
+
+        // 删除所有上帧 placement（d=i 小写：保留 image data，避免 re-place 时数据不存在）
+        for &id in &self.active_cover_ids {
+            out.write_all(&crate::ui::kitty::delete_placement(id))?;
+        }
+
+        // 放置本帧所有封面
+        for (id, rect) in &placements {
+            write!(out, "\x1b[{};{}H", rect.y + 1, rect.x + 1)?;
+            out.write_all(&crate::ui::kitty::place_at_cursor(*id, rect.width, rect.height))?;
+        }
+
+        out.write_all(b"\x1b8")?;
+        out.flush()?;
+
+        self.active_cover_ids = new_ids;
+        Ok(())
     }
 
     fn render_settings(&self, frame: &mut Frame, area: ratatui::layout::Rect) {
@@ -307,6 +359,7 @@ impl App {
             area,
             &detail,
             playback,
+            &self.cache.covers,
         );
     }
 }

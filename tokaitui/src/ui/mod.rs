@@ -2,6 +2,8 @@
 pub mod i18n;
 
 pub mod constants;
+pub mod cover_widget;
+pub mod kitty;
 pub mod help;
 pub mod log_view;
 pub mod lyrics;

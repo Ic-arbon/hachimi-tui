@@ -16,6 +16,13 @@ const SEEK_STEP_SECS: u32 = 5;
 
 impl App {
     pub(crate) fn handle_event(&mut self, event: Event) {
+        // 终端大小变化：标记需要在下次 draw() 之后重新上传 image data
+        // （不能在此处写 stdout，ratatui 的 \x1b[2J 清屏发生在下次 draw() 里，会覆盖提前写入的数据）
+        if let Event::Resize(_, _) = event {
+            self.needs_cover_reupload = true;
+            return;
+        }
+
         if let Event::Key(key) = event {
             // 无条件拦截 Ctrl+C，任何状态下都可退出
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
@@ -118,8 +125,8 @@ impl App {
             // 展开页专属键
             match (key.modifiers, key.code) {
                 (_, KeyCode::Char('i')) => self.player.expanded = false,
-                (_, KeyCode::Char('j') | KeyCode::Down) => self.nav_down(),
-                (_, KeyCode::Char('k') | KeyCode::Up) => self.nav_up(),
+                (_, KeyCode::Char('j') | KeyCode::Down) => { self.nav_down(); }
+                (_, KeyCode::Char('k') | KeyCode::Up) => { self.nav_up(); }
                 (_, KeyCode::Char('g')) => self.nav_top(),
                 (_, KeyCode::Char('G')) => self.nav_bottom(),
                 (_, KeyCode::Char('h') | KeyCode::Left) => self.player.expanded = false,
@@ -149,8 +156,8 @@ impl App {
                     self.nav.current_mut().selected = 0;
                 }
             }
-            (_, KeyCode::Char('j') | KeyCode::Down) => self.nav_down(),
-            (_, KeyCode::Char('k') | KeyCode::Up) => self.nav_up(),
+            (_, KeyCode::Char('j') | KeyCode::Down) => { self.nav_down(); }
+            (_, KeyCode::Char('k') | KeyCode::Up) => { self.nav_up(); }
             (_, KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter) => self.nav_drill_in(),
             (_, KeyCode::Char('h') | KeyCode::Left) => self.nav_drill_out(),
             (_, KeyCode::Char('g')) => self.nav_top(),
@@ -282,6 +289,13 @@ impl App {
             }
             AppMessage::PlayerTick => {
                 self.scroll_tick = self.scroll_tick.wrapping_add(1);
+                if let Some((url, t)) = self.pending_cover_load.take() {
+                    if t.elapsed() >= Duration::from_millis(250) {
+                        self.maybe_load_cover(url);
+                    } else {
+                        self.pending_cover_load = Some((url, t));
+                    }
+                }
             }
             AppMessage::PlayerStateChanged(event) => {
                 match event {
@@ -425,6 +439,14 @@ impl App {
                         songs[index] = detail;
                     }
                 }
+            }
+            AppMessage::CoverReady { url, id, upload_seq } => {
+                use std::io::Write;
+                let _ = std::io::stdout().write_all(&upload_seq);
+                let _ = std::io::stdout().flush();
+                self.cache.covers_loading.remove(&url);
+                self.cache.covers.insert(url.clone(), id);
+                self.cache.cover_upload_seqs.insert(url, upload_seq);
             }
         }
     }

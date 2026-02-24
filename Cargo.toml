@@ -35,6 +35,10 @@ rodio = { version = "0.21", default-features = false, features = [
     "symphonia-flac",
 ] }
 
+# Image
+image = { version = "0.25", default-features = false, features = ["jpeg", "webp"] }
+base64 = "0.22"
+
 # Utilities
 rand = "0.10"
 anyhow = "1"

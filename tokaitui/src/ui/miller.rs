@@ -30,6 +30,8 @@ pub struct ColumnData<'a> {
     pub search_type: SearchType,
     pub search_users: &'a [PublicUserProfile],
     pub search_playlists: &'a [PlaylistMetadata],
+    /// URL → Kitty image ID（已上传到终端的封面）
+    pub covers: &'a HashMap<String, u32>,
 }
 
 /// 渲染 Miller Columns 三栏布局
@@ -294,6 +296,7 @@ fn render_preview_column(
     selected: usize,
     data: &ColumnData,
 ) {
+    let covers = data.covers;
     if parent_node.has_static_children() {
         let children = parent_node.children();
         if children.is_empty() {
@@ -392,32 +395,32 @@ fn render_preview_column(
     } else if *parent_node == NavNode::Queue {
         if let Some(item) = data.queue.songs.get(selected) {
             if let Some(detail) = data.queue_detail.get(&item.id) {
-                render_song_detail(frame, area, detail);
+                render_song_detail(frame, area, detail, covers);
             } else {
-                render_queue_item_detail(frame, area, item, data.queue.current_index == Some(selected));
+                render_queue_item_detail(frame, area, item, data.queue.current_index == Some(selected), covers);
             }
         }
     } else if *parent_node == NavNode::SearchResults {
         match data.search_type {
             SearchType::Song => {
                 if let Some(song) = data.song_cache.get(&NavNode::SearchResults).and_then(|s| s.get(selected)) {
-                    render_song_detail(frame, area, song);
+                    render_song_detail(frame, area, song, covers);
                 }
             }
             SearchType::User => {
                 if let Some(user) = data.search_users.get(selected) {
-                    render_user_preview(frame, area, user);
+                    render_user_preview(frame, area, user, covers);
                 }
             }
             SearchType::Playlist => {
                 if let Some(pl) = data.search_playlists.get(selected) {
-                    render_playlist_preview(frame, area, pl);
+                    render_playlist_preview(frame, area, pl, covers);
                 }
             }
         }
     } else if let Some(songs) = data.song_cache.get(parent_node) {
         if let Some(song) = songs.get(selected) {
-            render_song_detail(frame, area, song);
+            render_song_detail(frame, area, song, covers);
         }
     }
 }
@@ -428,8 +431,10 @@ fn render_queue_item_detail(
     area: Rect,
     item: &crate::model::queue::MusicQueueItem,
     is_playing: bool,
+    covers: &HashMap<String, u32>,
 ) {
     let inner = super::util::padded_rect(area, 2);
+    let inner = apply_cover(frame, inner, &item.cover_url, covers);
 
     let mut lines = Vec::new();
 
@@ -487,8 +492,10 @@ fn render_song_detail(
     frame: &mut Frame,
     area: Rect,
     song: &PublicSongDetail,
+    covers: &HashMap<String, u32>,
 ) {
     let inner = super::util::padded_rect(area, 2);
+    let inner = apply_cover(frame, inner, &song.cover_url, covers);
 
     let mut lines = vec![
         Line::from(Span::styled(
@@ -740,8 +747,14 @@ fn render_user_preview(
     frame: &mut Frame,
     area: Rect,
     user: &PublicUserProfile,
+    covers: &HashMap<String, u32>,
 ) {
     let inner = super::util::padded_rect(area, 2);
+    let inner = if let Some(ref url) = user.avatar_url {
+        apply_cover(frame, inner, url, covers)
+    } else {
+        inner
+    };
     let mut lines = vec![Line::from(Span::styled(user.username.clone(), Style::default().add_modifier(Modifier::BOLD)))];
     if let Some(bio) = &user.bio {
         if !bio.is_empty() {
@@ -757,8 +770,14 @@ fn render_playlist_preview(
     frame: &mut Frame,
     area: Rect,
     pl: &PlaylistMetadata,
+    covers: &HashMap<String, u32>,
 ) {
     let inner = super::util::padded_rect(area, 2);
+    let inner = if let Some(ref url) = pl.cover_url {
+        apply_cover(frame, inner, url, covers)
+    } else {
+        inner
+    };
     let mut lines = vec![
         Line::from(Span::styled(pl.name.clone(), Style::default().add_modifier(Modifier::BOLD))),
         Line::from(Span::styled(format!("by {}", pl.user_name), Theme::secondary())),
@@ -775,4 +794,33 @@ fn render_playlist_preview(
         }
     }
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+/// 若封面已加载，在 inner 顶部渲染封面并返回收缩后的文字区域；否则原样返回
+fn apply_cover(
+    frame: &mut Frame,
+    inner: Rect,
+    cover_url: &str,
+    covers: &HashMap<String, u32>,
+) -> Rect {
+    let cover_h = (inner.height / 3).min(14);
+    if cover_h < 4 {
+        return inner;
+    }
+    if let Some(&id) = covers.get(cover_url) {
+        let cover_w = (cover_h * 2).min(inner.width);
+        let cx = inner.x + (inner.width - cover_w) / 2;
+        let cover_rect = Rect::new(cx, inner.y, cover_w, cover_h);
+        frame.render_widget(
+            super::cover_widget::CoverWidget { image_id: id },
+            cover_rect,
+        );
+        Rect {
+            y: inner.y + cover_h + 1,
+            height: inner.height.saturating_sub(cover_h + 1),
+            ..inner
+        }
+    } else {
+        inner
+    }
 }
