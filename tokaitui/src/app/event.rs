@@ -133,6 +133,7 @@ impl App {
                 (_, KeyCode::Char('l') | KeyCode::Right | KeyCode::Enter) => {
                     self.play_expanded_song();
                 }
+                (_, KeyCode::Char('D')) => self.fetch_danmaku(),
                 _ => {}
             }
             return;
@@ -171,6 +172,7 @@ impl App {
                     }
                 }
             }
+            (_, KeyCode::Char('D')) => self.fetch_danmaku(),
             (_, KeyCode::Char('p')) => {
                 // TODO: 添加到歌单
             }
@@ -445,6 +447,9 @@ impl App {
                 let _ = std::io::stdout().write_all(&upload_seq);
                 let _ = std::io::stdout().flush();
                 self.cache.covers.mark_loaded(url, id, upload_seq);
+            }
+            AppMessage::DanmakuFetched { title, path } => {
+                self.logs.push(LogLevel::Info, format!("弹幕已保存：{path}  ({title})"));
             }
         }
     }

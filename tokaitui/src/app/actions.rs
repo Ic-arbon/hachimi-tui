@@ -870,6 +870,62 @@ impl App {
         });
     }
 
+    /// 下载当前选中歌曲的 B 站弹幕并保存为 XML
+    pub(crate) fn fetch_danmaku(&mut self) {
+        let song = if self.player.expanded {
+            let node = self.nav.current().node.clone();
+            let sel = self.nav.current().selected;
+            let browsed = if !node.has_static_children() {
+                self.cache.songs.get(&node).and_then(|s| s.get(sel)).cloned()
+            } else {
+                None
+            };
+            if self.player.follow_playback {
+                self.player.current_detail.clone().or(browsed)
+            } else {
+                browsed.or_else(|| self.player.current_detail.clone())
+            }
+        } else {
+            self.selected_song().cloned()
+        };
+
+        let Some(song) = song else {
+            self.logs.push(crate::ui::log_view::LogLevel::Warn, "无选中歌曲".to_string());
+            return;
+        };
+
+        let bili_link = song.external_links.iter()
+            .find(|l| l.platform.to_ascii_lowercase().contains("bilibili"))
+            .map(|l| l.url.clone());
+
+        let Some(url) = bili_link else {
+            self.logs.push(crate::ui::log_view::LogLevel::Warn,
+                format!("「{}」无 Bilibili 外链", song.title));
+            return;
+        };
+
+        let Some(bvid) = extract_bvid(&url) else {
+            self.logs.push(crate::ui::log_view::LogLevel::Warn,
+                format!("无法从链接提取 BV 号：{url}"));
+            return;
+        };
+
+        let title = song.title.clone();
+        let display_id = song.display_id.clone();
+        let tx = self.msg_tx.clone();
+
+        tokio::spawn(async move {
+            match do_fetch_danmaku(bvid, title.clone(), display_id).await {
+                Ok(path) => {
+                    let _ = tx.send(AppMessage::DanmakuFetched { title, path });
+                }
+                Err(e) => {
+                    let _ = tx.send(AppMessage::Error(format!("弹幕下载失败：{e}")));
+                }
+            }
+        });
+    }
+
     /// 队列预览时异步获取选中项的完整歌曲详情
     pub(crate) fn maybe_fetch_queue_detail(&mut self) {
         if self.nav.current().node != NavNode::Queue {
@@ -898,5 +954,50 @@ impl App {
             });
         }
     }
+}
 
+fn extract_bvid(url: &str) -> Option<String> {
+    let idx = url.find("/BV")?;
+    let rest = &url[idx + 1..];
+    let end = rest.find('/').unwrap_or(rest.len());
+    Some(rest[..end].to_string())
+}
+
+async fn do_fetch_danmaku(
+    bvid: String,
+    title: String,
+    display_id: String,
+) -> anyhow::Result<String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0")
+        .build()?;
+
+    // 获取 cid
+    let view_url = format!("https://api.bilibili.com/x/web-interface/view?bvid={bvid}");
+    let resp: serde_json::Value = client.get(&view_url).send().await?.json().await?;
+    let cid = resp["data"]["cid"].as_i64()
+        .ok_or_else(|| anyhow::anyhow!("无法获取 cid，响应：{resp}"))?;
+
+    // 下载弹幕 XML（B站返回裸 deflate）
+    let dm_url = format!("https://comment.bilibili.com/{cid}.xml");
+    let compressed = client.get(&dm_url).send().await?.bytes().await?;
+    let xml_bytes: Vec<u8> = {
+        use std::io::Read;
+        let mut decoder = flate2::read::DeflateDecoder::new(compressed.as_ref());
+        let mut out = Vec::new();
+        decoder.read_to_end(&mut out)
+            .map_err(|e| anyhow::anyhow!("deflate 解压失败：{e}"))?;
+        out
+    };
+
+    // 写入文件
+    let safe_title: String = title.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' { c } else { '_' })
+        .collect();
+    let filename = format!("{display_id}_{bvid}_{safe_title}.xml");
+    let dir = crate::config::paths::danmaku_dir()?;
+    let path = dir.join(&filename);
+    std::fs::write(&path, &xml_bytes)?;
+
+    Ok(path.to_string_lossy().into_owned())
 }

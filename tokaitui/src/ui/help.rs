@@ -39,6 +39,12 @@ fn help_sections() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 // ("p", t!("help.add_playlist")),  // TODO: 歌单功能尚未实现
             ],
         ),
+        (
+            t!("help.section.danmaku"),
+            vec![
+                ("D", t!("help.fetch_danmaku")),
+            ],
+        ),
         // TODO: 搜索功能尚未实现
         // (
         //     t!("help.section.search"),

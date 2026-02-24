@@ -2685,6 +2685,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "dirs",
+ "flate2",
  "image",
  "mambocore",
  "open",

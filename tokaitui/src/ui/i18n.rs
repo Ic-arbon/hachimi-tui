@@ -103,6 +103,8 @@ fn tr_en(key: &str) -> &'static str {
         "help.switch_type" => "Switch type",
         "help.switch_sort" => "Switch sort",
         "help.exit_search" => "Exit search",
+        "help.fetch_danmaku" => "Fetch Bilibili danmaku to file",
+        "help.section.danmaku" => "Danmaku",
 
         // logs
         "logs.title" => "Logs",
@@ -226,6 +228,8 @@ fn tr_zh(key: &str) -> &'static str {
         "help.switch_type" => "切换类型",
         "help.switch_sort" => "切换排序",
         "help.exit_search" => "退出搜索",
+        "help.fetch_danmaku" => "下载 B 站弹幕到文件",
+        "help.section.danmaku" => "弹幕",
 
         // logs
         "logs.title" => "日志",

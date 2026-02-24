@@ -58,6 +58,8 @@ pub enum AppMessage {
         id: u32,
         upload_seq: Vec<u8>,
     },
+    /// 弹幕下载完成
+    DanmakuFetched { title: String, path: String },
 }
 
 /// 后台加载的数据

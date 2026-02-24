@@ -39,6 +39,9 @@ rodio = { version = "0.21", default-features = false, features = [
 image = { version = "0.25", default-features = false, features = ["jpeg", "webp"] }
 base64 = "0.22"
 
+# Compression
+flate2 = "1"
+
 # Utilities
 rand = "0.10"
 anyhow = "1"

@@ -37,3 +37,9 @@ pub fn auth_file() -> Result<PathBuf> {
 pub fn queue_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("queue.json"))
 }
+
+pub fn danmaku_dir() -> Result<PathBuf> {
+    let dir = config_dir()?.join("danmaku");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
