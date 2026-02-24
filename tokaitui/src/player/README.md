@@ -26,4 +26,4 @@ App (主线程/tokio)                   Player 线程
 ## 音频源
 
 目前仅支持 `AudioSource::Buffered(Vec<u8>)`——先完整下载到内存再播放。
-音频数据由 `app/actions.rs` 中的 `start_audio_fetch` 异步下载后通过 `AppMessage::AudioFetched` 传递。
+音频数据由 `app/actions/playback.rs` 中的 `start_audio_fetch` 异步下载后通过 `AppMessage::AudioFetched` 传递。

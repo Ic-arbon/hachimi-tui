@@ -7,22 +7,29 @@
 
 | 文件 | 职责 |
 |------|------|
-| `mod.rs` | `App` 结构体与子状态（`PlayerState`、`DataCache`）定义；`new()`/`run()`/`main_loop()` 生命周期方法 |
-| `event.rs` | 终端事件分发（`handle_event`）；Normal/Search/Login 三种输入模式的键盘处理；`handle_global_key` 提取 expanded/normal 共享键绑定（q/?/!/空格/n/N/±/⟨⟩/s）；`adjust_volume`/`seek_relative` 封装音量和快进操作；`handle_message` 处理所有 `AppMessage` |
-| `actions.rs` | 业务动作：认证流程（captcha → login → logout）、数据加载、播放控制（play/pause/next/prev/seek）、Miller Columns 导航、图片异步加载；`play_from_list` 统一"替换队列并播放"逻辑；`on_selection_changed` 收敛列表选择变化后的 `follow_playback`/`scroll_tick` 处理 |
-| `render.rs` | 帧渲染调度：header、miller columns、player bar、settings、player view、浮层（help/logs） |
+| `mod.rs` | `App`、`UiState`、`CoverState`、`PlayerState`、`DataCache` 等结构体定义；`new()`/`run()`/`main_loop()` 生命周期方法 |
+| `event.rs` | 终端事件分发（`handle_event`）；`handle_overlay_key` 处理帮助/日志浮层；Normal/Search/Login 三种输入模式的键盘处理；`handle_global_key` 提取 expanded/normal 共享键绑定（q/?/!/空格/n/N/±/⟨⟩/s）；`handle_message` 处理所有 `AppMessage` |
+| `render.rs` | 帧渲染调度：header、miller columns、player bar、settings、player view、浮层（help/logs）、封面 placement |
+| `actions/mod.rs` | 常量定义（`SEARCH_PAGE_SIZE`、`HISTORY_PAGE_SIZE`）+ 子模块声明 |
+| `actions/auth.rs` | 认证流程：`start_captcha`、`submit_login`、`logout`、`resume_playback` |
+| `actions/data.rs` | 数据加载：`execute_search`、`load_node_data`、`maybe_load_preview_data`、`maybe_fetch_song_detail`、`maybe_fetch_queue_detail` |
+| `actions/playback.rs` | 播放控制：`toggle_play_pause`、`play_next`/`play_prev`、`play_from_list`、`play_expanded_song`、`start_audio_fetch`、队列操作 |
+| `actions/navigation.rs` | Miller Columns 导航：`nav_down`/`up`/`drill_in`/`drill_out`/`top`/`bottom`、`after_nav_move`、`current_list_len` |
+| `actions/cover.rs` | 封面图片：`schedule_cover_load`、`maybe_load_cover`、`current_preview_cover_url`；弹幕下载：`fetch_danmaku` |
 
 ## 状态分组
 
 ```
 App
 ├── player: PlayerState      # 播放引擎 + 播放栏 + 音量/静音/展开
-├── cache: DataCache          # 歌曲/标签缓存 + 加载状态 + 图片缓存 + Picker
+├── cache: DataCache          # 歌曲/标签缓存 + 加载状态 + 封面缓存(CoverCache)
 ├── queue: QueueState         # 播放队列（独立模块）
 ├── nav: NavStack             # Miller Columns 导航栈
 ├── search: SearchState       # 搜索输入状态
+├── ui: UiState               # input_mode, show_help, help_scroll, show_logs, logs, scroll_tick
+├── cover: CoverState         # kitty_supported, pending_cover_load, active_cover_ids, needs_cover_reupload
 ├── login: LoginState         # 登录表单状态
-└── ...                       # running, settings, client, logs, msg channel 等
+└── ...                       # running, settings, client, username, msg channel 等
 ```
 
 ## 消息驱动架构
